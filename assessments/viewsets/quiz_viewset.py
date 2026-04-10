@@ -28,6 +28,14 @@ class QuizViewSet(viewsets.ReadOnlyModelViewSet):
         tags=["Assessments"],
     )
     def list(self, request, *args, **kwargs):
+        """Transposes and serializes the active sequential listing representation for operational Quizzes.
+
+        Args:
+            request (Request): The incoming operational HTTP REST framework request sequence.
+
+        Returns:
+            Response: A structured standard DRF Response mapping containing the sequential JSON metadata.
+        """
         return super().list(request, *args, **kwargs)
 
     @swagger_auto_schema(
@@ -39,4 +47,12 @@ class QuizViewSet(viewsets.ReadOnlyModelViewSet):
         tags=["Assessments"],
     )
     def retrieve(self, request, *args, **kwargs):
+        """Generates dynamic relational serialization for a unified operational Quiz instance detail payload view.
+
+        Args:
+            request (Request): The incoming operational HTTP REST framework request sequence.
+
+        Returns:
+            Response: A structured DRF Response instance binding the absolute entity topological JSON layout configurations.
+        """
         return super().retrieve(request, *args, **kwargs)

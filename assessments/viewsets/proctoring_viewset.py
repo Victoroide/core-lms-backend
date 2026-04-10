@@ -98,6 +98,14 @@ class ProctoringViewSet(viewsets.ViewSet):
         },
     )
     def create(self, request):
+        """Asynchronously parses and ingests batched relational anti-cheat telemetry event schemas.
+
+        Args:
+            request (Request): The incoming authenticated HTTP REST framework request pipeline component.
+
+        Returns:
+            Response: A structured DRF Response metric detailing the integral count of structural events committed.
+        """
         serializer = ProctoringBulkSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
 

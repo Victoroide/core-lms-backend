@@ -3,7 +3,12 @@ from django.db import models
 
 
 class LMSUser(AbstractUser):
-    """Platform user extended with EdTech-specific fields."""
+    """Platform user configuration object extended with explicit EdTech-specific parametric fields.
+
+    Attributes:
+        role (str): The relational operational role logic string.
+        vark_dominant (str): The explicitly defined overriding target learning modality logic sequence.
+    """
 
     class Role(models.TextChoices):
         STUDENT = "STUDENT"
@@ -32,4 +37,9 @@ class LMSUser(AbstractUser):
         verbose_name_plural = "LMS Users"
 
     def __str__(self):
+        """Generates a standard mapping identification pointer string format component.
+
+        Returns:
+            str: The mapped entity text identity array logic.
+        """
         return f"{self.username} ({self.role})"
