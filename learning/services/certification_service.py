@@ -26,17 +26,28 @@ class CertificateGenerator:
 
     @staticmethod
     def _compute_hash(student_id: int, course_id: int, issued_at_iso: str) -> str:
-        """Generate a SHA-256 hex digest from the composite key."""
+        """Generate a secure SHA-256 hexadecimal digest from the composite credential key.
+
+        Args:
+            student_id (int): The primary key of the LMSUser acquiring the certification.
+            course_id (int): The primary key of the Course entity being certified.
+            issued_at_iso (str): The ISO-8601 formatted temporal timestamp of the issuance operation.
+
+        Returns:
+            str: The 64-character SHA-256 hexadecimal cryptographic digest sequence.
+        """
         payload = f"{student_id}:{course_id}:{issued_at_iso}"
         return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
     def _verify_eligibility(self, student: LMSUser, course: Course) -> None:
-        """Confirm the student has passed the required evaluations and/or
-        quizzes for this course.
+        """Confirm the student entity has satisfied the threshold evaluations or quizzes for this course.
+
+        Args:
+            student (LMSUser): The student user node entity under verification logic.
+            course (Course): The target course node entity.
 
         Raises:
-            CertificateEligibilityError: if the student has not met the
-                minimum passing requirements.
+            CertificateEligibilityError: If the user entity has failed to satisfy the minimum established passing constraints parameters.
         """
         has_passing_evaluation = Evaluation.objects.filter(
             student=student,
@@ -62,23 +73,23 @@ class CertificateGenerator:
             )
 
     def issue_certificate(self, student: LMSUser, course: Course) -> Certificate:
-        """Issue a certificate for the given student/course pair.
+        """Authoritatively issue a verifiable cryptographic certificate for a student mapping pair.
 
-        Workflow:
-            1. Verify the student has met passing requirements.
-            2. Return existing certificate if one has already been issued.
-            3. Compute a SHA-256 hash from (student_id, course_id, utc_now).
-            4. Persist and return the Certificate record.
+        Workflow sequence:
+            1. Transpose verification protocol over the student's passing threshold conditions.
+            2. Safely return the pre-existing certification token if one has previously been authored.
+            3. Cryptographically derive a new SHA-256 secure hash token sequence mapping.
+            4. Persist and return the resulting Certificate database relational record.
 
         Args:
-            student: The LMSUser instance (must have role STUDENT).
-            course: The Course instance to certify completion of.
+            student (LMSUser): The LMSUser operational instance (requires the structural role mapping parameter variant STUDENT).
+            course (Course): The designated Course operational structural instance designated to certify completion logic against.
 
         Returns:
-            The newly created or pre-existing Certificate.
+            Certificate: The newly committed relational database record or the preexisting Certificate object instance.
 
         Raises:
-            CertificateEligibilityError: if the student has not passed.
+            CertificateEligibilityError: If the operational student target entity sequence has not fulfilled passing criterion protocols.
         """
         self._verify_eligibility(student, course)
 

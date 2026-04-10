@@ -14,24 +14,33 @@ AXIOM_TIMEOUT = (5, 25)
 class AxiomEngineClient:
     """HTTP client for the AxiomEngine Go microservice.
 
-    Translates the rich Django evaluation data into the flat payload
-    contract expected by POST /api/v1/adaptive-plan, executes the request,
-    and returns the parsed JSON response.
+    Translates the rigorous Django evaluation dataset into the flattened payload
+    contract expected by POST /api/v1/adaptive-plan, executes the synchronous HTTP request,
+    and parses the returned JSON payload.
     """
 
     def __init__(self):
+        """Initializes the client with the base URL determined by the deployment environment.
+
+        Raises:
+            django.core.exceptions.ImproperlyConfigured: If AXIOM_ENGINE_URL configuration is missing.
+        """
         self.base_url = settings.AXIOM_ENGINE_URL.rstrip("/")
 
     def request_adaptive_plan(self, evaluation_id: int) -> dict:
-        """Build the payload from DB records and POST to AxiomEngine.
+        """Build the payload from database records and dispatch HTTP POST to the AxiomEngine.
 
-        Returns the parsed JSON response from the Go microservice containing
-        the adaptive study plan and pipeline metadata.
+        Args:
+            evaluation_id (int): The primary key of the Evaluation record triggering the request.
+
+        Returns:
+            dict: The deserialized JSON response originating from the Go microservice,
+                containing the adaptive study plan payload and computational pipeline metadata.
 
         Raises:
-            AxiomEngineTimeout: if the request exceeds AXIOM_TIMEOUT.
-            AxiomEngineError: if the Go service returns a non-2xx status.
-            Evaluation.DoesNotExist: if evaluation_id is invalid.
+            AxiomEngineTimeout: If the discrete HTTP request exceeds the maximum configured AXIOM_TIMEOUT threshold.
+            AxiomEngineError: If the Go microservice returns an HTTP non-2xx status code sequence.
+            Evaluation.DoesNotExist: If the provided evaluation_id sequence does not map to a recognized database record.
         """
         evaluation = (
             Evaluation.objects

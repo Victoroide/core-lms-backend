@@ -18,11 +18,13 @@ class ScoringService:
     """
 
     def score_and_evaluate(self, attempt: QuizAttempt) -> dict:
-        """Compute the score, persist Evaluation/FailedTopic records, and
-        call AxiomEngine.
+        """Compute the final numerical score for an operational QuizAttempt, persist relational tracking records, and trigger computational modeling.
 
-        Returns a dict with keys: score, max_score, failed_concepts,
-        evaluation_id, adaptive_plan (or axiom_error).
+        Args:
+            attempt (QuizAttempt): The relational database target attempt sequence record requiring statistical computation.
+
+        Returns:
+            dict: The operational scoring metrics containing discrete float parameters for `score`, `max_score`, a list sequence for `failed_concepts`, the integral `evaluation_id`, and mapping pointers for `adaptive_plan` and `axiom_error` dict arrays.
         """
         attempt.end_time = timezone.now()
         answers = attempt.answers.select_related(
