@@ -22,11 +22,7 @@ All variables are read from the process environment. Required variables must be 
 | SECRET_KEY | yes | Django secret key, 50+ random characters. Never reuse a development key. | (random) |
 | DEBUG | no | Leave unset or set to `False` in production. | False |
 | ALLOWED_HOSTS | yes | Comma-separated hostnames allowed by Django. | api.example.com |
-| NEON_DB_NAME | yes | NeonDB database name. | axiom_lms |
-| NEON_DB_USER | yes | NeonDB username. | axiom_user |
-| NEON_DB_PASSWORD | yes | NeonDB password. | (secret) |
-| NEON_DB_HOST | yes | NeonDB hostname. | ep-xx.us-east-2.aws.neon.tech |
-| NEON_DB_PORT | no | NeonDB port, default 5432. | 5432 |
+| DATABASE_URL | yes | Full NeonDB connection string including sslmode and channel_binding query params. | postgresql://user:pass@host/db?sslmode=require&channel_binding=require |
 | AWS_ACCESS_KEY_ID | yes | IAM key for S3 access. | AKIA... |
 | AWS_SECRET_ACCESS_KEY | yes | IAM secret for S3 access. | (secret) |
 | AWS_STORAGE_BUCKET_NAME | yes | S3 bucket name. | axiom-lms-files |
@@ -57,7 +53,7 @@ Complete every item before promoting a build to production.
 ## Build
 
 ```
-docker build -t ficct-jobs-backend:latest .
+docker build -t core-lms-backend:latest .
 ```
 
 The Dockerfile installs Python dependencies, copies the source tree, and sets `PYTHONPATH=/app`. The default `CMD` runs Gunicorn with three workers on port 8000.
@@ -65,7 +61,7 @@ The Dockerfile installs Python dependencies, copies the source tree, and sets `P
 ## Run
 
 ```
-docker run -p 8000:8000 --env-file .env ficct-jobs-backend:latest
+docker run -p 8000:8000 --env-file .env core-lms-backend:latest
 ```
 
 The container does **not** run migrations on startup in production. Migrations are a manual step (see checklist) to avoid accidental schema changes during rolling restarts or autoscaling events.

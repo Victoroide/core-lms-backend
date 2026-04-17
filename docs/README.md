@@ -18,7 +18,7 @@ GraphRAG reasoning.
 
    ```bash
    git clone <repository-url>
-   cd ficct-jobs-backend
+   cd core-lms-backend
    ```
 
 2. Copy the example environment file and fill in credentials:

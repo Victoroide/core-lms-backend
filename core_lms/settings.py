@@ -2,11 +2,9 @@ import os
 import sys
 from datetime import timedelta
 from pathlib import Path
-
-from dotenv import load_dotenv
+from urllib.parse import parse_qsl, urlparse
 
 BASE_DIR = Path(__file__).resolve().parent.parent
-load_dotenv(BASE_DIR / ".env")
 
 SECRET_KEY = os.getenv("SECRET_KEY", "django-insecure-change-me")
 DEBUG = os.getenv("DEBUG", "False").lower() in ("true", "1", "yes")
@@ -73,33 +71,27 @@ TEMPLATES = [
 WSGI_APPLICATION = "core_lms.wsgi.application"
 
 # ---------------------------------------------------------------------------
-# Database -- NeonDB for production, Docker PostgreSQL for test suite
+# Database -- DATABASE_URL for production/dev, POSTGRES_* for ephemeral tests
 # ---------------------------------------------------------------------------
-ENVIRONMENT = os.getenv("DJANGO_ENV", "development")
+_db_url = os.getenv("DATABASE_URL")
+_postgres_url = (
+    f"postgresql://{os.getenv('POSTGRES_USER')}:{os.getenv('POSTGRES_PASSWORD')}"
+    f"@{os.getenv('POSTGRES_HOST', 'db')}:{os.getenv('POSTGRES_PORT', '5432')}"
+    f"/{os.getenv('POSTGRES_DB')}"
+)
+_parsed = urlparse(_db_url if os.getenv("DJANGO_ENV") != "test" else _postgres_url)
 
-if ENVIRONMENT == "test":
-    DATABASES = {
-        "default": {
-            "ENGINE": "django.db.backends.postgresql",
-            "NAME": os.getenv("POSTGRES_DB"),
-            "USER": os.getenv("POSTGRES_USER"),
-            "PASSWORD": os.getenv("POSTGRES_PASSWORD"),
-            "HOST": os.getenv("POSTGRES_HOST", "db"),
-            "PORT": os.getenv("POSTGRES_PORT", "5432"),
-        }
+DATABASES = {
+    "default": {
+        "ENGINE": "django.db.backends.postgresql",
+        "NAME": _parsed.path.lstrip("/"),
+        "USER": _parsed.username,
+        "PASSWORD": _parsed.password,
+        "HOST": _parsed.hostname,
+        "PORT": _parsed.port or 5432,
+        "OPTIONS": dict(parse_qsl(_parsed.query)),
     }
-else:
-    DATABASES = {
-        "default": {
-            "ENGINE": "django.db.backends.postgresql",
-            "NAME": os.getenv("NEON_DB_NAME"),
-            "USER": os.getenv("NEON_DB_USER"),
-            "PASSWORD": os.getenv("NEON_DB_PASSWORD"),
-            "HOST": os.getenv("NEON_DB_HOST"),
-            "PORT": os.getenv("NEON_DB_PORT", "5432"),
-            "OPTIONS": {"sslmode": "require"},
-        }
-    }
+}
 
 AUTH_USER_MODEL = "learning.LMSUser"
 

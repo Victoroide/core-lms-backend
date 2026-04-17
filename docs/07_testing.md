@@ -11,6 +11,18 @@ Validate isolated model behavior, service logic, and storage callables without
 HTTP overhead. Each test class targets a single concern and runs against a
 throwaway PostgreSQL database spun up by Docker Compose.
 
+### Database Configuration
+
+The settings module selects the database from the environment:
+
+- When `DJANGO_ENV=test`, Django connects to the local Docker `db` service
+  using the `POSTGRES_*` variables (`POSTGRES_DB`, `POSTGRES_USER`,
+  `POSTGRES_PASSWORD`, `POSTGRES_HOST=db`, `POSTGRES_PORT`). The test database
+  is ephemeral and wiped on every `docker compose up`.
+- In all other environments, Django connects using the single `DATABASE_URL`
+  connection string (typically a NeonDB connection with `sslmode=require` and
+  `channel_binding=require` in the query string).
+
 ### Layer 2: Integration Tests (DRF APITestCase)
 
 Exercise full HTTP request/response flows through the DRF router, including JWT
