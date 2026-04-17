@@ -17,4 +17,4 @@ COPY . .
 
 EXPOSE 8000
 
-CMD ["sh", "-c", "gunicorn core_lms.wsgi:application --bind 0.0.0.0:${PORT:-8000} --workers 2 --timeout 60"]
+CMD ["sh", "-c", "python manage.py collectstatic --noinput && gunicorn core_lms.wsgi:application --bind 0.0.0.0:${PORT:-8000} --workers 2 --timeout 60"]
