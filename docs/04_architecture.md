@@ -1,203 +1,414 @@
 # 04 -- Architecture
 
-> PUDS -- AxiomLMS Platform Architecture Document
-> Version 1.0 | 2026-04-16
+> Sources live in two repositories:
+> - Django: `core-lms-backend` (this repo)
+> - Go:     `axiom-reasoning-svc` (sister repo)
+>
+> Every claim cites a specific file:line. The contract boundary between
+> Django and Go is documented in § 3.1, with three known contract
+> violations surfaced in § 5.
 
 ---
 
 ## 1. Deployment Diagram
 
 ```
-+---------------------+         +-------------------------------+         +----------------------------+
-|                     |  REST   |                               |  SQL    |                            |
-|   Angular SPA       +-------->+   Django / DRF Monolith       +-------->+   NeonDB PostgreSQL        |
-|   (port 4200)       |  CORS   |   (port 8000)                 |  SSL    |   (serverless, production) |
-|                     |         |                               |         |                            |
-+---------------------+         +-------+---------------+-------+         +----------------------------+
-                                        |               |
-                                        |               |
-                          HTTP POST     |               |  boto3 / django-storages
-                          /api/v1/      |               |
-                          adaptive-plan |               |
-                                        v               v
-                         +--------------+--+    +-------+----------------+
-                         |                 |    |                        |
-                         | AxiomEngine Go  |    |   AWS S3               |
-                         | (port 8080)     |    |   Private ACL          |
-                         | Fiber + BAML    |    |   Pre-signed URLs      |
-                         |                 |    |                        |
-                         +--------+--------+    +------------------------+
-                                  |
-                                  | BAML fan-out
-                                  v
-                         +--------+--------+
-                         |                 |
-                         | Amazon Nova     |
-                         | Micro (LLM)    |
-                         |                 |
-                         +-----------------+
++---------------------+          +--------------------------------+          +----------------------------+
+|    Angular SPA      |  HTTPS   |  Django + Gunicorn monolith    |   TLS    |  NeonDB PostgreSQL         |
+|                     +--------->+  core_lms.wsgi:application     +--------->+  (production) /            |
+|                     |  CORS    |  port 8000 (PORT env)          |  SSL     |  Docker Postgres 15        |
++---------+-----------+          |                                |          |  (test / local)            |
+          |                      +----+--------+------------+-----+          +----------------------------+
+          |                           |        |            |
+          |   direct GET              |  POST  |     boto3  |
+          |   cognitive-graph         |        |            |
+          |                           v        v            v
+          |                 +---------+--+  +--+---------+  +-------------------------+
+          |                 |            |  |            |  |                         |
+          +---------------->+  AxiomEngine  |            |  |  AWS S3 (private ACL)   |
+                            |  Go / Fiber   |            |  |  pre-signed URLs        |
+                            |  port 8080    |            |  |  expiry 3600s           |
+                            +------+--------+            |  +-------------------------+
+                                   |                     |
+                                   | BAML                |
+                                   v                     v
+                            +------+--------+   (staticfiles bucket location
+                            | AWS Bedrock   |    "static/", public URLs,
+                            | Nova Micro    |    file_overwrite=True)
+                            +---------------+
 ```
+
+Ports:
+- Django listens on `0.0.0.0:${PORT:-8000}` (Dockerfile:20,
+  `d:/Repositories/python/django/core-lms-backend/Dockerfile#L20`).
+- AxiomEngine listens on `":" + os.Getenv("PORT")` with a default of
+  `"8080"` (`cmd/server/main.go:49-52, 120`).
 
 ---
 
 ## 2. Component Descriptions
 
-### 2.1 Django Monolith (port 8000)
+### 2.1 Django Monolith
 
-The backend is a Django 5.1.7 application using Django REST Framework. It is organized as a monolith containing three Django apps:
+- Python 3.11 (Dockerfile base `python:3.11-slim`, `Dockerfile:1`).
+- Django 5.1.7, DRF 3.15.2 (`requirements.txt:1-2`).
+- Three apps, registered in `INSTALLED_APPS`
+  (`core_lms/settings.py:26-28`): `apps.learning`, `apps.assessments`,
+  `apps.curriculum`.
+- Each app follows split-topology directories: `models/`, `serializers/`,
+  `viewsets/`, `services/`, plus `urls.py` and `apps.py`.
+- Global routing is in `core_lms/urls.py`, including Swagger/ReDoc at
+  `/swagger/` and `/redoc/` (`core_lms/urls.py:51-60`).
+- Authentication: SimpleJWT configured at `core_lms/settings.py:133-139`
+  (access=30 min, refresh=7 d, rotation with blacklist).
+- Default REST Framework permission class: `IsAuthenticated`
+  (`core_lms/settings.py:121-123`); pagination: `PageNumberPagination`,
+  `PAGE_SIZE=20` (`core_lms/settings.py:116-117`).
+- Custom global exception handler
+  (`core_lms.exception_handler.custom_exception_handler`) replaces
+  unhandled 500 HTML pages with a JSON `{"detail": ...}` envelope
+  (`core_lms/settings.py:127`).
+- Responsibilities: user account management; full CRUD over the academic
+  ontology; quiz scoring via `ScoringService`
+  (`apps/assessments/services/scoring_service.py:14`); synchronous plan
+  generation via `AxiomEngineClient`
+  (`apps/learning/services/axiom_service.py:14`); certificate issuance with
+  SHA-256 hashing (`apps/learning/services/certification_service.py:28-40`);
+  S3 uploads and pre-signed URL rendering.
 
-- **learning** -- User management, evaluations, telemetry, certificates, and failed-topic tracking.
-- **assessments** -- Quizzes, questions, answer choices, quiz attempts, attempt answers, proctoring logs, and scoring.
-- **curriculum** -- Academic ontology: careers, semesters, courses, modules, lessons, resources, assignments, and submissions.
+### 2.2 AxiomEngine Go microservice
 
-Each app follows a split-topology layout:
+- Entrypoint `cmd/server/main.go`.
+- Framework: Fiber v2 with helmet, sliding-window rate limiter, logger,
+  and panic-recovery middleware (`cmd/server/main.go:72-105`).
+- JSON (de)serialization: `github.com/goccy/go-json`
+  (`cmd/server/main.go:34, 64-65`).
+- Logging: structured JSON via `log/slog`
+  (`cmd/server/main.go:45-47`).
+- Rate limit: **50 req/min per IP**, sliding window
+  (`cmd/server/main.go:75-86`). On exceeded: HTTP 429 with
+  `{"error": "rate_limit_exceeded", "details": "Too many requests. Max
+  50 per minute."}`.
+- Graceful shutdown on `SIGINT`/`SIGTERM` with 10-second timeout
+  (`cmd/server/main.go:115-133`).
 
-```
-app_name/
-    models/          # One file per model
-    serializers/     # One file per serializer
-    viewsets/        # One file per viewset
-    services/        # Business logic layer
-    urls.py          # Router registration
-    apps.py          # AppConfig
-    admin.py         # Admin site registration
-    permissions.py   # Custom permission classes (where applicable)
-```
+#### Reasoning pipeline (six stages)
 
-Responsibilities:
+All stages live in `internal/service/reasoning.go` and are orchestrated
+by `ReasoningService.GeneratePlan` (line 94). The file's package comment
+at `internal/service/reasoning.go:5-12` names them authoritatively:
 
-- JWT authentication via SimpleJWT (access + refresh token pair).
-- Full CRUD for the academic ontology and assessment entities.
-- Automated scoring of quiz attempts, including failed-topic extraction.
-- Synchronous invocation of AxiomEngine for adaptive study plan generation.
-- Certificate generation with SHA-256 hashing for tamper detection.
-- File upload and pre-signed URL generation for S3-backed resources and submissions.
-- Soft-delete across eight models via `SoftDeleteManager` and `AllObjectsManager`.
+| # | Stage | Source |
+|---|-------|--------|
+| 1 | Subgraph extraction — BFS over the in-memory graph at depth `subgraphDepth=2` | `reasoning.go:102-110`, `graph/memory.go:128-173` (`GetLocalSubgraph`) |
+| 2 | Topological prerequisite sort — DFS post-order per failed topic | `reasoning.go:112-120`, `graph/memory.go:89-115` (`GetPrerequisiteChain`) |
+| 3 | Parallel BAML fan-out — one `GenerateTopicPlan` call per failed topic via `errgroup`, each wrapped in a circuit breaker | `reasoning.go:122-175` |
+| 4 | Merge & deduplicate per-topic plans | `reasoning.go:177-180` (`mergeAndDeduplicate`) |
+| 5 | Hallucination guard — drop items whose `topic` is not a node in the graph | `reasoning.go` (later stages; referenced in package comment line 11) |
+| 6 | Response enrichment with `_meta` pipeline telemetry only (no `estimated_study_time` or `difficulty` fields exist on `PlanItem`) — see `domain/models.go:91-111` | `reasoning.go` |
 
-### 2.2 AxiomEngine Go Microservice (port 8080)
+Per-topic LLM timeout: **15 seconds**
+(`reasoning.go:83, 134-135`). Pipeline (request-level) timeout:
+**20 seconds** (`internal/api/handlers.go:25, 101-102`).
 
-A standalone Go microservice responsible for GraphRAG reasoning over a concept topology derived from quiz results. It produces personalized adaptive study plans for students who complete assessments.
+#### Circuit breaker (sony/gobreaker)
 
-**Technology stack:** Go, Fiber HTTP framework, BAML (structured LLM orchestration).
+Configured at `reasoning.go:62-78`:
+- Name: `"bedrock-nova-micro"`
+- MaxRequests (half-open probes): **2**
+- Interval (closed-state counting window): **30 seconds**
+- Timeout (open-state hold): **15 seconds**
+- ReadyToTrip: opens after **3 consecutive failures**
+- On open: `GeneratePlan` returns `ErrCircuitOpen`
+  (`reasoning.go:36, 148-151`), which the handler maps to **HTTP 503**
+  with `{"error": "service_unavailable", "details": "LLM backend
+  circuit breaker is open; try again later"}`
+  (`api/handlers.go:116-122`).
 
-**6-stage pipeline:**
+#### BAML / LLM
 
-1. **Subgraph extraction** -- Identifies the relevant concept subgraph from the student's failed topics and their dependency relationships.
-2. **Topological sort** -- Orders concepts by prerequisite depth so the study plan follows a pedagogically valid sequence.
-3. **Parallel BAML fan-out** -- Issues concurrent structured prompts to Amazon Nova Micro for each concept cluster, generating study recommendations.
-4. **Merge and deduplication** -- Combines parallel LLM responses into a single coherent plan, removing redundant recommendations.
-5. **Hallucination validation** -- Cross-checks generated content against the known concept topology to discard fabricated concepts or resources.
-6. **Response enrichment** -- Attaches metadata (estimated study time, difficulty ratings, resource links) to each plan item.
+- Client: AWS Bedrock Nova Micro, model id
+  `"amazon.nova-micro-v1:0"`, `max_tokens=2048`, `temperature=0.1`
+  (`baml_src/clients.baml:1-14`).
+- Retry policy `BedrockRetry`: `max_retries=2`, exponential backoff
+  `delay_ms=500`, `multiplier=2.0`, `max_delay_ms=10000`
+  (`baml_src/clients.baml:16-23`).
+- BAML functions:
+  - `GenerateTopicPlan(graph_context, target_topic, prerequisite_order,
+    vark_profile, student_id, course_id) -> AdaptiveStudyPlan`
+    (`baml_src/resume.baml:31-73`) — called once per failed topic in
+    the fan-out.
+  - `GenerateAdaptivePlan(graph_context, failed_topics, vark_profile)
+    -> AdaptiveStudyPlan` (`baml_src/resume.baml:77-108`) — defined
+    but **not** invoked by the current pipeline.
+- Go bindings generated into `baml_client/` (`baml_src/generators.baml:6-20`).
 
-**Resilience mechanisms:**
+#### Knowledge graph
 
-- Circuit breaker: opens after 3 consecutive failures, 15-second timeout before half-open retry.
-- Rate limiting: 50 requests per minute per IP address, enforced at the Fiber middleware level.
+- In-memory only (`internal/graph/memory.go:30-35`), seeded from 19
+  hardcoded triples in `defaultTuples()`
+  (`internal/graph/memory.go:241-264`) — nodes include `Polymorphism`,
+  `Inheritance`, `Classes`, `Recursion`, `Graph Traversal`, `AVL Trees`,
+  etc., related by `depends_on` or `is_a`.
+- Data structure: two adjacency maps (`forward` and `reverse`), a
+  `nodes` set, and an ordered `all` slice of `GraphTuple`
+  (`graph/memory.go:30-35`).
+- Traversal used by the pipeline:
+  - `GetPrerequisiteChain(topic)` — DFS post-order following only
+    `depends_on` and `is_a` edges (`graph/memory.go:89-115`).
+  - `GetLocalSubgraph(topics, depth)` — depth-limited BFS over forward
+    and reverse edges (`graph/memory.go:128-173`).
+  - `GenerateCognitiveShadow(studentID, failedTopics)` — returns full
+    `CognitiveGraphResponse` with every node classified as `failed`,
+    `learning`, or `mastered` (`graph/memory.go:188-235`).
 
-### 2.3 AWS S3
+### 2.3 AWS S3 (default storage)
 
-Object storage for two categories of files:
+- Configured in `core_lms/settings.py:171-193`:
+  - `"default"` backend: `S3Boto3Storage`, `default_acl="private"`,
+    `querystring_auth=True`, `querystring_expire=3600`,
+    `file_overwrite=False`.
+  - `"staticfiles"` backend: `S3Boto3Storage`,
+    `location="static"`, `querystring_auth=False`,
+    `file_overwrite=True`. Collected at container start via
+    `python manage.py collectstatic --noinput` (`Dockerfile:20`).
+- Bucket domain derived as
+  `f"{AWS_STORAGE_BUCKET_NAME}.s3.amazonaws.com"`
+  (`core_lms/settings.py:166`), with `STATIC_URL` set accordingly
+  (line 168).
+- Upload paths (server-computed):
+  - `Resource.file` → `resources/{course_id}/{filename}`
+    (`apps/learning/services/storage_service.py:4-14`).
+  - `Submission.file` → `submissions/{student_id}/{filename}`
+    (`apps/curriculum/services/storage_service.py:4-14`).
+- Settings guard at `core_lms/settings.py:195-206` raises
+  `ImproperlyConfigured` unless AWS credentials are provided (skipped
+  for `test`, `makemigrations`, `collectstatic` invocations).
 
-- **Resources** -- Lesson-attached materials (PDFs, images, videos) uploaded by tutors.
-- **Submissions** -- Student assignment submissions.
+### 2.4 PostgreSQL
 
-Configuration:
-
-- Private ACL on all objects (no public access).
-- Pre-signed URLs with 1-hour expiry (`AWS_QUERYSTRING_EXPIRE=3600`) for secure, time-limited download access.
-- Managed via `django-storages` with the `boto3` backend.
-
-### 2.4 NeonDB PostgreSQL
-
-Serverless PostgreSQL provided by Neon, used as the production database.
-
-- SSL required in production (`sslmode=require` in the connection string).
-- Docker ephemeral PostgreSQL instance used for local development and CI testing.
-- Connection pooling handled by Neon's built-in proxy.
+- Django picks the DSN at import time (`core_lms/settings.py:76-93`):
+  - If `DJANGO_ENV != "test"` → parses `DATABASE_URL`.
+  - Else → constructs `postgresql://{POSTGRES_USER}:{POSTGRES_PASSWORD}
+    @{POSTGRES_HOST:db}:{POSTGRES_PORT:5432}/{POSTGRES_DB}` for the
+    Docker Postgres container (`docker-compose.yml:db`).
+- `DATABASES["default"].OPTIONS` is populated from the DSN query string
+  (line 92), so Neon-specific flags like `sslmode=require&
+  channel_binding=require` (see `.env.example`) flow through as
+  psycopg options.
 
 ---
 
 ## 3. Communication Patterns
 
-### 3.1 Django to AxiomEngine (Synchronous HTTP)
+### 3.1 Django → AxiomEngine (synchronous HTTP)
 
-| Aspect         | Detail                                                    |
-|----------------|-----------------------------------------------------------|
-| Method         | POST                                                      |
-| Endpoint       | `http://<axiom-engine-host>:8080/api/v1/adaptive-plan`    |
-| Content-Type   | `application/json`                                        |
-| Timeout        | 3 seconds connect, 10 seconds read                        |
-| Caller         | `AxiomEngineClient` in `learning/services/axiom_service.py` |
-| Trigger        | Invoked by `ScoringService` after quiz attempt scoring     |
+| Aspect | Value | Source |
+|--------|-------|--------|
+| Caller | `AxiomEngineClient` | `apps/learning/services/axiom_service.py:14` |
+| Invoked from | `ScoringService.score_and_evaluate` (UC-01) and `EvaluationViewSet.create` (UC-02) | `apps/assessments/services/scoring_service.py:88-96`; `apps/learning/viewsets/evaluation_viewset.py:60-63` |
+| Method | `POST` | `axiom_service.py:90` |
+| URL | `{AXIOM_ENGINE_URL}/api/v1/adaptive-plan` | `axiom_service.py:31, 80`; `core_lms/settings.py:157` |
+| Content-Type | `application/json` | `axiom_service.py:94` |
+| Connect / read timeouts | `(3, 10)` seconds | `axiom_service.py:11, 93` |
 
-The call is synchronous. The Django request thread blocks until AxiomEngine responds or the timeout elapses. This is acceptable because adaptive plan generation is tied to a single user action (quiz submission) and is not on a high-throughput path.
+#### Request body (Django → Go)
 
-### 3.2 Django to AWS S3 (boto3 via django-storages)
-
-| Aspect         | Detail                                                    |
-|----------------|-----------------------------------------------------------|
-| Library        | `django-storages[s3]` with `boto3`                        |
-| Upload         | `FileField` with `upload_to` callables for dynamic paths  |
-| Download       | Pre-signed URL generation via the storage backend          |
-| Authentication | IAM credentials (`AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`) |
-
-File uploads are handled by DRF's multipart parser. The storage backend streams the file directly to S3 during model save.
-
-### 3.3 Angular to Django (REST over CORS)
-
-| Aspect         | Detail                                                    |
-|----------------|-----------------------------------------------------------|
-| Protocol       | HTTPS in production, HTTP in development                  |
-| CORS origins   | `http://localhost:4200` (dev), production domain           |
-| Authentication | Bearer token in `Authorization` header (JWT access token)  |
-| Pagination     | `PageNumberPagination` with `PAGE_SIZE=20`                 |
-| Content-Type   | `application/json` for all non-file endpoints              |
-
-CORS is configured via `django-cors-headers` middleware.
-
----
-
-## 4. Error Handling Strategy
-
-### 4.1 AxiomEngine Failure
-
-The `AxiomEngineClient` class wraps all HTTP calls to the Go microservice and handles failure modes explicitly:
-
-| Failure Mode             | Handling                                                              |
-|--------------------------|-----------------------------------------------------------------------|
-| `ConnectionError`        | Caught by `AxiomEngineClient`. Returns fallback response.             |
-| `Timeout`                | Caught by `AxiomEngineClient`. Returns fallback response.             |
-| Non-2xx status code      | Caught by `AxiomEngineClient`. Returns fallback response.             |
-| `AxiomEngineError`       | Caught by `ScoringService`. Stores fallback plan in `adaptive_plan`.  |
-
-Fallback response structure:
+Constructed at
+[axiom_service.py:71-78](../apps/learning/services/axiom_service.py#L71-L78):
 
 ```json
 {
-  "plan": [],
-  "fallback": true
+  "student_id":  "<str(evaluation.student.pk)>",
+  "course_id":   "<evaluation.course.code>",
+  "failed_topics": ["<FailedTopic.concept_id>", ...],
+  "vark_profile": "<LMSUser.vark_dominant>",
+  "telemetry": {                      // only when EvaluationTelemetry exists
+    "session_id":     "eval-<evaluation.pk>",
+    "timestamp_unix": <int(evaluation.created_at.timestamp())>,
+    "duration_ms":    <tel.time_on_task_seconds * 1000.0>,
+    "client_version": "django-lms-1.0"
+  }
 }
 ```
 
-When a fallback is stored, the frontend displays a generic message indicating that personalized recommendations are temporarily unavailable. The student still receives their score and failed-topic breakdown.
+Go receiver — `AdaptivePlanRequest`
+([internal/domain/models.go:16-34](../../axiom-reasoning-svc/internal/domain/models.go#L16-L34)):
 
-### 4.2 S3 Pre-signed URL Expiry
+| JSON key | Go field | Go type |
+|----------|----------|---------|
+| `student_id` | `StudentID` | `string` |
+| `course_id` | `CourseID` | `string` |
+| `failed_topics` | `FailedTopics` | `[]string` (must be non-empty) |
+| `vark_profile` | `VARKProfile` | `string` (non-empty) |
+| `telemetry` | `Telemetry` | `*Telemetry`, omitempty |
 
-Pre-signed URLs are generated with a 1-hour TTL (`AWS_QUERYSTRING_EXPIRE=3600`). If a client attempts to access an expired URL, AWS returns a 403 Forbidden response. The client must request a fresh URL from the Django API.
+Validation on the Go side (`internal/api/handlers.go:81-93`):
+- 400 if `failed_topics` is empty.
+- 400 if `vark_profile` is empty.
 
-### 4.3 Database Integrity
+#### Response body (Go → Django, success)
 
-- **Soft delete** prevents accidental data loss. Eight models carry `is_deleted` (BooleanField, default False) and `deleted_at` (DateTimeField, nullable) fields. The default manager (`SoftDeleteManager`) filters out soft-deleted records in all standard queries. An `AllObjectsManager` is available for administrative and seeding operations that need access to deleted records.
-- **Foreign key constraints** are enforced at the database level. Cascade behavior is defined per relationship in the Django model `on_delete` parameter.
-- **Unique constraints** (e.g., certificate per student-course pair, submission per assignment-student pair) are enforced at both the model and database levels.
+Go `PlanResponse`
+([internal/domain/models.go:73-86](../../axiom-reasoning-svc/internal/domain/models.go#L73-L86)):
 
-### 4.4 Authentication Failures
+```json
+{
+  "student_id": "...",
+  "course_id":  "...",
+  "items": [
+    {
+      "topic": "...",
+      "priority": 1,
+      "prerequisite_chain": ["...", "..."],
+      "explanation": "...",
+      "resources": [
+        {"title": "...", "url": "...", "resource_type": "..."}
+      ]
+    }
+  ],
+  "_meta": {
+    "subgraph_tuples": 12,
+    "topics_processed": 2,
+    "items_generated": 6,
+    "items_after_validation": 5,
+    "llm_latency_ms": 3240.5,
+    "total_latency_ms": 3312.8
+  }
+}
+```
 
-| Scenario                  | Response Code | Detail                                         |
-|---------------------------|---------------|-------------------------------------------------|
-| Missing token             | 401           | `Authentication credentials were not provided.` |
-| Expired access token      | 401           | `Token is invalid or expired.`                  |
-| Insufficient permissions  | 403           | `You do not have permission to perform this action.` |
-| Invalid refresh token     | 401           | `Token is invalid or expired.`                  |
+Django does not reshape the response body. `AxiomEngineClient` returns
+`response.json()` verbatim
+(`apps/learning/services/axiom_service.py:120-126`), which the callers
+persist directly into `QuizAttempt.adaptive_plan` (UC-01) or
+`response_data["adaptive_plan"]` (UC-02).
 
-JWT access tokens have a short lifetime. The Angular frontend uses the refresh token endpoint to obtain new access tokens transparently.
+#### Adaptive-plan envelope (union of success and fallback)
+
+The `adaptive_plan` field stored in DB and returned to clients is
+heterogeneous:
+
+| Variant | Keys | When |
+|---------|------|------|
+| **Success** | `student_id`, `course_id`, `items[]`, `_meta` | Go returns 2xx |
+| **Fallback** | `plan: []`, `fallback: true` | Django caught `Timeout` or `ConnectionError` (`axiom_service.py:96-107`) — in the `ScoringService` code path only (scoring_service.py:92-96 also substitutes fallback on `AxiomEngineError`). The `EvaluationViewSet` path never writes a fallback envelope; on error, `adaptive_plan` is `null` and `axiom_error` is populated instead (`evaluation_viewset.py:64-78`). |
+
+Clients must handle both shapes — see § 5 (CV-02).
+
+#### Error responses from Go
+
+| Status | JSON payload | Trigger |
+|--------|--------------|---------|
+| 400 | `{"error":"invalid_request_body"\|"validation_error","details":...}` | body parse failure, empty `failed_topics`, empty `vark_profile` (`handlers.go:72-92`) |
+| 429 | `{"error":"rate_limit_exceeded","details":"Too many requests. Max 50 per minute."}` | sliding-window limiter (`main.go:75-86`) |
+| 500 | `{"error":"reasoning_failed","details":...}` | generic pipeline failure (`handlers.go:123-127`) |
+| 503 | `{"error":"service_unavailable","details":"LLM backend circuit breaker is open; try again later"}` | circuit open (`handlers.go:116-122`) |
+| 504 | `{"error":"gateway_timeout","details":"LLM reasoning exceeded deadline"}` | request-level 20s context deadline (`handlers.go:109-114`) |
+
+### 3.2 Angular → AxiomEngine directly (cognitive-shadow graph)
+
+`GET /api/v1/tutor/student/:student_id/cognitive-graph?topics=...`
+(`cmd/server/main.go:109-112`, handler at
+`internal/api/handlers.go:150-186`). The path param is echoed as
+`student_id`; the `topics` query string is comma-separated. Returns
+`CognitiveGraphResponse` with `nodes[]` (each node classified as
+`failed`, `learning`, or `mastered`) and `edges[]`
+(`internal/domain/models.go:163-208`). **No Django code calls this
+endpoint.**
+
+### 3.3 Django → AWS S3 (boto3)
+
+- Library: `django-storages[s3]` + `boto3` (`requirements.txt:9-10`).
+- Upload: DRF multipart parser → `FileField` → `S3Boto3Storage.save()`.
+- Download: the serializer renders `file.url`, which `S3Boto3Storage`
+  resolves to a pre-signed URL (1-hour expiry given `querystring_expire=3600`).
+
+### 3.4 Angular → Django (REST)
+
+- JWT Bearer token in `Authorization` header; access tokens expire in
+  30 minutes.
+- CORS origins configurable via `CORS_ALLOWED_ORIGINS`
+  (`core_lms/settings.py:45-51`), default `"http://localhost:4200"`.
+- Pagination envelope `{count, next, previous, results}` returned for
+  all list endpoints.
+
+---
+
+## 4. Error Handling
+
+### 4.1 AxiomEngine failures (Django side)
+
+| Failure | Django reaction | Source |
+|---------|------------------|--------|
+| `requests.exceptions.Timeout` | returns `{"plan": [], "fallback": true}` | `axiom_service.py:96-100` |
+| `requests.exceptions.ConnectionError` | returns `{"plan": [], "fallback": true}` | `axiom_service.py:101-107` |
+| Non-2xx response | raises `AxiomEngineError(status_code, detail)` | `axiom_service.py:109-118` |
+| `AxiomEngineError` in `ScoringService` | caught, stores fallback envelope on `QuizAttempt.adaptive_plan` | `scoring_service.py:92-96` |
+| `AxiomEngineTimeout` or `AxiomEngineError` in `EvaluationViewSet.create` | response includes `axiom_error: {...}`; `adaptive_plan` stays `null` | `evaluation_viewset.py:64-78` |
+
+### 4.2 S3 pre-signed URL expiry
+
+URLs expire after 3600 s (`core_lms/settings.py:179`). On expiry, the
+frontend re-fetches the parent resource to obtain a fresh signed URL.
+
+### 4.3 Database integrity
+
+- Soft-delete on eight models (see `01_vision.md` § 4.3 and
+  `05_database_schema.md` § 4).
+- Unique constraints enforced at the schema level: `Certificate` on
+  `(student, course)`; `Submission` on `(assignment, student)`;
+  `AttemptAnswer` on `(attempt, question)`; `Semester` on `(career,
+  number, year)`.
+- `core_lms.exception_handler.custom_exception_handler` catches
+  unhandled exceptions and returns JSON 500
+  (`core_lms/exception_handler.py:12-35`).
+
+### 4.4 Authentication failures
+
+| Situation | Response |
+|-----------|----------|
+| Missing/invalid JWT | DRF 401 with `{"detail": "Authentication credentials were not provided."}` or `"Token is invalid or expired."` |
+| Wrong role | `IsStudent`/`IsTutor` returns 403 with `message` attribute of the permission class |
+| 10/min token rate exceeded | 429 from `RateLimitedTokenView` (`apps/learning/viewsets/auth_viewset.py:42-55`) |
+
+---
+
+## 5. Contract Violations (flag, do not silently fix)
+
+These are code-level discrepancies between Django and Go as of commit
+`555fc67` on `main`. They should be resolved in code, not masked in the
+docs.
+
+### CV-01 — VARK enum mismatch
+
+- Django: `LMSUser.VARKProfile.AURAL = "aural"`
+  (`apps/learning/models/user_model.py:19`) and the onboarding endpoint
+  enforces the same spelling
+  (`apps/learning/viewsets/user_onboarding_viewset.py:15`).
+- Go: the `AdaptivePlanRequest` docstring and the BAML `resume.baml`
+  prompt both use `"auditory"`
+  (`axiom-reasoning-svc/internal/domain/models.go:28`,
+  `axiom-reasoning-svc/baml_src/resume.baml`).
+- When an aural-dominant student triggers plan generation, Django sends
+  `"aural"`; the Go handler accepts any non-empty string but the BAML
+  resource-type VARK mapping expects one of
+  `{visual, auditory, read_write, kinesthetic}`. Generated resources
+  may not strictly match the student's modality.
+
+### CV-02 — Heterogeneous `adaptive_plan` envelope
+
+See § 3.1 table. The success envelope uses `items` + `_meta`; the
+fallback envelope uses `plan` + `fallback`. Consumers (frontend, tests,
+downstream analytics) must branch on the presence of `fallback` to
+disambiguate. No single schema covers both cases; resolution would
+require the fallback path to either produce an empty `items[]` with
+`_meta` zeroed-out, or a normalised `status` field on both.
+
+### CV-03 — `_meta` underscore prefix
+
+Go serialises pipeline telemetry under the key `_meta`
+(`internal/domain/models.go:85`). All other top-level keys are
+unprefixed. Clients that strip underscore-prefixed keys (e.g. some
+JSON post-processors) will drop pipeline observability data silently.
+Rename or document explicitly on the client side.

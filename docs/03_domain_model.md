@@ -1,246 +1,302 @@
 # 03 -- Domain Model
 
+> Field names, types, constraints, and relationships are transcribed from
+> `apps/*/models/*_model.py`. Line numbers cite the model file.
+
 ## 1. Class Diagram
 
 ```
-+------------------+          +------------------+          +------------------+
-|     LMSUser      |          |      Career      |          |    Semester      |
-|------------------|          |------------------|          |------------------|
-| (AbstractUser)   |          | name             |          | career  -> Career|
-| role             |          | code  [unique]   |          | name             |
-| vark_dominant    |          | description      |          | number           |
-+------------------+          | created_at       |          | year             |
-        |                     | [SoftDelete]     |          | period           |
-        |                     +------------------+          | created_at       |
-        |                            |  1                   | [SoftDelete]     |
-        |                            |                      +------------------+
-        |                            | has many                    |  1
-        |                            v                             |
-        |                     +------------------+                 | has many
-        |                     |    Semester      |-----------------+
-        |                     +------------------+
-        |                            |  1
-        |                            | has many
-        |                            v
-        |                     +------------------+
-        |                     |     Course       |
-        |                     |------------------|
-        |                     | semester -> Semester (nullable)
-        |                     | name             |
-        |                     | code  [unique]   |
-        |                     | description      |
-        |                     | created_at       |
-        |                     | [SoftDelete]     |
-        |                     +------------------+
-        |                       |  1          |  1
-        |          +------------+             +-------------+
-        |          | has many                   has many    |
-        |          v                                        v
-        |   +------------------+                  +------------------+
-        |   |     Module       |                  |       Quiz       |
-        |   |------------------|                  |------------------|
-        |   | course -> Course |                  | course -> Course |
-        |   | title            |                  | title            |
-        |   | description      |                  | description      |
-        |   | order            |                  | time_limit_min   |
-        |   | [SoftDelete]     |                  | is_active        |
-        |   +------------------+                  | created_at       |
-        |          |  1                           +------------------+
-        |          | has many                            |  1
-        |          v                                     | has many
-        |   +------------------+                         v
-        |   |     Lesson       |                  +------------------+
-        |   |------------------|                  |    Question      |
-        |   | module -> Module |                  |------------------|
-        |   | title            |                  | quiz -> Quiz     |
-        |   | content          |                  | text             |
-        |   | order            |                  | concept_id       |
-        |   | [SoftDelete]     |                  | order            |
-        |   +------------------+                  +------------------+
-        |     |  1        |  1                           |  1
-        |     |           |                              | has many
-        |     |           | has many                     v
-        |     |           v                       +------------------+
-        |     |    +------------------+           |  AnswerChoice    |
-        |     |    |   Assignment     |           |------------------|
-        |     |    |  (curriculum)    |           | question -> Q    |
-        |     |    |------------------|           | text             |
-        |     |    | lesson -> Lesson |           | is_correct       |
-        |     |    | created_by ->User|           +------------------+
-        |     |    | title            |                  |
-        |     |    | description      |                  | selected in
-        |     |    | due_date         |                  v
-        |     |    | max_score        |           +------------------+
-        |     |    | [SoftDelete]     |           | AttemptAnswer    |
-        |     |    +------------------+           |------------------|
-        |     |           |  1                    | attempt -> QA    |
-        |     |           | has many              | question -> Q    |
-        |     |           v                       | selected_choice  |
-        |     |    +------------------+           |   -> AC          |
-        |     |    |   Submission     |           +------------------+
-        |     |    |  (curriculum)    |                  ^
-        |     |    |------------------|                  | has many
-        |     |    | assignment -> A  |                  |
-        |     |    | student -> User  |           +------------------+
-        |     |    | file             |           |   QuizAttempt    |
-        |     |    | submitted_at     |           |------------------|
-        |     |    | grade            |           | student -> User  |
-        |     |    | graded_at        |           | quiz -> Quiz     |
-        |     |    | [SoftDelete]     |           | start_time       |
-        |     |    +------------------+           | end_time         |
-        |     |                                   | final_score      |
-        |     | has many                          | is_submitted     |
-        |     v                                   | adaptive_plan    |
-        |   +------------------+                  |   (JSONField)    |
-        |   |    Resource      |                  +------------------+
-        |   |------------------|                         |  1
-        |   | lesson -> Lesson |                         | has many
-        |   | uploaded_by->User|                         v
-        |   | file             |                  +------------------+
-        |   | resource_type    |                  | ProctoringLog    |
-        |   | title            |                  |------------------|
-        |   | created_at       |                  | attempt -> QA    |
-        |   | [SoftDelete]     |                  | event_type       |
-        |   +------------------+                  | timestamp        |
-        |                                         | severity_score   |
-        |                                         +------------------+
-        |
-        |         +------------------+         +---------------------+
-        +-------->|   Evaluation     |-------->| EvaluationTelemetry |
-        |         |------------------|  1 : 1  |---------------------|
-        |         | student -> User  |         | evaluation -> Eval  |
-        |         | course -> Course |         | time_on_task_seconds|
-        |         | score            |         | clicks              |
-        |         | max_score        |         +---------------------+
-        |         | created_at       |
-        |         +------------------+
-        |                |  1
-        |                | has many
-        |                v
-        |         +------------------+
-        |         |   FailedTopic    |
-        |         |------------------|
-        |         | evaluation ->Eval|
-        |         | concept_id       |
-        |         | score            |
-        |         | max_score        |
-        |         +------------------+
-        |
-        |         +------------------+
-        +-------->|   Certificate    |
-                  |------------------|
-                  | student -> User  |
-                  | course -> Course |
-                  | issued_at        |
-                  | certificate_hash |
-                  |   [unique]       |
-                  +------------------+
++-----------------------+           +-----------------------+           +-----------------------+
+|       LMSUser         |           |        Career         |           |       Semester        |
+|  (AbstractUser)       |           |  (SoftDeleteMixin)    |           |  (SoftDeleteMixin)    |
+|-----------------------|           |-----------------------|           |-----------------------|
+| role        [10, E1]  |           | name       (200)      |           | career -> Career (CASCADE)
+| vark_dominant [15, E2]|           | code   unique (20)    |           | name       (100)      |
++-----------------------+           | description TEXT      |           | number     uint       |
+                                    | created_at auto       |           | year       uint       |
+                                    +-----------+-----------+           | period   [10, E3]     |
+                                                | 1                     | created_at auto       |
+                                                | has many              +-----------+-----------+
+                                                v                                   | 1
+                                       +-----------------------+                    | has many
+                                       |       Semester        |<-------------------+
+                                       +-----------+-----------+
+                                                   | 1
+                                                   | has many (SET_NULL, nullable)
+                                                   v
+                                       +-----------------------+
+                                       |        Course         |
+                                       |  (SoftDeleteMixin)    |
+                                       |-----------------------|
+                                       | semester -> Semester (SET_NULL, nullable)
+                                       | name (200), code unique (20)
+                                       | description, created_at auto
+                                       +-----+-----------------+---+
+                                             | 1               | 1
+                          +------------------+                 +---------------+
+                          | has many                                   has many |
+                          v                                                     v
+                  +---------------+   +-----------------+    +---------------+   +------------+
+                  |   Module      |   |      Quiz       |    |  Evaluation   |   | Certificate|
+                  |  (SoftDel)    |   |-----------------|    |---------------|   |------------|
+                  | course -> C   |   | course -> C     |    | student -> U  |   | student->U |
+                  | title (255)   |   | title (255)     |    | course  -> C  |   | course ->C |
+                  | description   |   | description     |    | score D(6,2)  |   | issued_at  |
+                  | order uint    |   | time_limit_min  |    | max_score     |   | cert_hash  |
+                  +------+--------+   | is_active       |    | created_at    |   | unique(64) |
+                         | 1          | created_at      |    +------+--------+   +------------+
+                         | has many   +--------+--------+           | 1
+                         v                     | 1                  +---------+
+                  +---------------+            | has many                     | has many
+                  |   Lesson      |            v                              v
+                  |  (SoftDel)    |    +--------------+            +-------------------+
+                  | module -> M   |    |   Question   |            |  FailedTopic      |
+                  | title (255)   |    |--------------|            |-------------------|
+                  | content TEXT  |    | quiz -> Q    |            | evaluation -> Ev  |
+                  | order uint    |    | text TEXT    |            | concept_id (100)  |
+                  +---+------+----+    | concept_id   |            | score D(6,2)      |
+                      | 1    | 1       | order uint   |            | max_score D(6,2)  |
+                      |      |         +------+-------+            +-------------------+
+              has many|      |has many        | 1
+                      v      v                | has many         +---------------------+
+            +-----------+  +-----------+      v                  | EvaluationTelemetry |
+            | Resource  |  | Assignment|   +-----------+         | (OneToOne Evaluation)|
+            | (SoftDel) |  | (SoftDel, |   | Answer    |         |---------------------|
+            |-----------|  |  curric.) |   | Choice    |         | evaluation -> Ev    |
+            | lesson->L |  |-----------|   |-----------|         | time_on_task_seconds|
+            | uploaded_by->U  (SET_NULL)   | question->Q         | clicks              |
+            | file      |  | lesson -> L   | text (500)          +---------------------+
+            | resource_ |  | created_by->U | is_correct
+            |   type E4 |  | title (255)   +-----------+
+            | title(255)|  | description   |
+            | created_at|  | due_date      | selected by
+            +-----------+  | max_score 100 |     v
+                           | created_at    | +--------------------+
+                           +------+--------+ |  AttemptAnswer     |
+                                  | 1        |--------------------|
+                                  | has many | attempt -> QA      |
+                                  v          | question -> Q      |
+                           +--------------+  | selected_choice->AC|
+                           |  Submission  |  | unique(attempt,Q)  |
+                           | (SoftDel,    |  +---------+----------+
+                           |  curric.)    |            ^
+                           |--------------|            | has many
+                           | assignment->A|     +-------------+
+                           | student -> U |     |  QuizAttempt|
+                           | file         |     |-------------|
+                           | submitted_at |     | student->U  |
+                           | grade null   |     | quiz -> Q   |
+                           | graded_at    |     | start_time  |
+                           | unique(A,U)  |     | end_time    |
+                           +--------------+     | final_score |
+                                                | is_submitted|
+                                                | adaptive_plan JSON
+                                                +------+------+
+                                                       | 1
+                                                       | has many
+                                                       v
+                                                +-----------------+
+                                                | ProctoringLog   |
+                                                |-----------------|
+                                                | attempt -> QA   |
+                                                | event_type E5   |
+                                                | timestamp       |
+                                                | severity_score  |
+                                                +-----------------+
+
+E1: role choices = {STUDENT, TUTOR} (user_model.py:13-15)
+E2: vark_dominant choices = {visual, aural, read_write, kinesthetic} (user_model.py:17-21)
+E3: period choices = {I, II, SUMMER} (semester_model.py:21-24)
+E4: resource_type choices = {PDF, VIDEO, DOCUMENT, IMAGE, OTHER} (resource_model.py:23-28)
+E5: event_type choices = {tab_switched, face_not_detected, multiple_faces} (proctoring_model.py:10-13)
 ```
 
-### Relationship Summary
+### Relationship summary
 
 ```
-Career          1 ----* Semester
-Semester        1 ----* Course          (Course.semester is nullable)
-Course          1 ----* Module
-Course          1 ----* Quiz
-Course          1 ----* Evaluation
-Course          1 ----* Certificate
-Module          1 ----* Lesson
-Lesson          1 ----* Resource
-Lesson          1 ----* Assignment      (curriculum app)
-Assignment      1 ----* Submission      (curriculum app)
-Quiz            1 ----* Question
-Question        1 ----* AnswerChoice
-Quiz            1 ----* QuizAttempt     (via attempts)
-QuizAttempt     1 ----* AttemptAnswer
-QuizAttempt     1 ----* ProctoringLog
-AttemptAnswer   * ----1 Question
-AttemptAnswer   * ----1 AnswerChoice
-Evaluation      1 ----1 EvaluationTelemetry
-Evaluation      1 ----* FailedTopic
-LMSUser         1 ----* QuizAttempt
-LMSUser         1 ----* Evaluation
-LMSUser         1 ----* Certificate
-LMSUser         1 ----* Submission      (as student)
-LMSUser         1 ----* Assignment      (as created_by)
-LMSUser         1 ----* Resource        (as uploaded_by)
+LMSUser          1 → *  Evaluation        (student, CASCADE)
+LMSUser          1 → *  Certificate       (student, CASCADE)
+LMSUser          1 → *  QuizAttempt       (student, CASCADE)
+LMSUser          1 → *  Resource          (uploaded_by, SET_NULL)
+LMSUser          1 → *  Assignment        (created_by, SET_NULL)
+LMSUser          1 → *  Submission        (student, CASCADE)
+
+Career           1 → *  Semester          (CASCADE)
+Semester         1 → *  Course            (Course.semester nullable, SET_NULL)
+Course           1 → *  Module            (CASCADE)
+Course           1 → *  Quiz              (CASCADE)
+Course           1 → *  Evaluation        (CASCADE)
+Course           1 → *  Certificate       (CASCADE)
+
+Module           1 → *  Lesson            (CASCADE)
+Lesson           1 → *  Resource          (CASCADE)
+Lesson           1 → *  Assignment        (CASCADE)
+Assignment       1 → *  Submission        (CASCADE)
+
+Quiz             1 → *  Question          (CASCADE)
+Question         1 → *  AnswerChoice      (CASCADE)
+Quiz             1 → *  QuizAttempt       (via attempts, CASCADE)
+QuizAttempt      1 → *  AttemptAnswer     (CASCADE; unique(attempt, question))
+QuizAttempt      1 → *  ProctoringLog     (CASCADE)
+AttemptAnswer    * → 1  Question          (CASCADE)
+AttemptAnswer    * → 1  AnswerChoice      (CASCADE)
+
+Evaluation       1 → 1  EvaluationTelemetry (CASCADE; OneToOne)
+Evaluation       1 → *  FailedTopic       (CASCADE)
 ```
 
-## 2. Model Descriptions
+## 2. Model Descriptions (one per model file)
 
-### LMSUser
+### LMSUser — `apps/learning/models/user_model.py`
+- Extends `AbstractUser` (line 5).
+- `role` — CharField(max_length=10, choices=Role.choices, default=STUDENT)
+  (lines 23-27). `Role.STUDENT = "STUDENT"`, `Role.TUTOR = "TUTOR"`.
+- `vark_dominant` — CharField(max_length=15, choices=VARKProfile.choices,
+  default=VISUAL) (lines 28-32). Values: `"visual"`, `"aural"`,
+  `"read_write"`, `"kinesthetic"`.
+- `Meta.db_table = "lms_user"` (line 35).
 
-Extends Django's AbstractUser to add two EdTech-specific fields: `role` (STUDENT or TUTOR) which drives RBAC permission checks across the API, and `vark_dominant` (visual, aural, read_write, or kinesthetic) which records the student's dominant learning modality. The VARK profile is transmitted to AxiomEngine when generating adaptive plans so that study resources can be tailored to the student's preferred learning style. Database table: `lms_user`.
+### Career — `apps/learning/models/career_model.py`
+- Fields: `name` CharField(200) (line 19); `code` CharField(20, unique=True)
+  (line 20); `description` TextField(blank=True, default="") (line 21);
+  `created_at` DateTimeField(auto_now_add=True) (line 22).
+- Managers: `objects = SoftDeleteManager()`,
+  `all_objects = AllObjectsManager()` (lines 24-25).
+- `Meta.db_table = "career"`, `ordering = ["code"]` (lines 28-29).
 
-### Career
+### Semester — `apps/learning/models/semester_model.py`
+- `career` — FK→Career, on_delete=CASCADE, related_name="semesters"
+  (lines 26-30).
+- `name` CharField(100) (line 31); `number` PositiveIntegerField (line 32);
+  `year` PositiveIntegerField (line 33); `period` CharField(max_length=10,
+  choices, default=FIRST) (line 34-38) with values `I`, `II`, `SUMMER`;
+  `created_at` auto (line 39).
+- `Meta.unique_together = [("career", "number", "year")]` (line 47).
 
-The top-level node in the academic ontology hierarchy. Represents a university degree program (e.g., Systems Engineering, Medicine). Each Career has a unique `code` used as a short identifier and a `name` for display. Uses the SoftDelete pattern, meaning deletion sets `is_deleted = True` rather than removing the row. Careers contain Semesters. Database table: `career`.
+### Course — `apps/learning/models/course_model.py`
+- `semester` — FK→Semester, **nullable**, on_delete=SET_NULL (lines 16-22).
+- `name` CharField(200) (line 23); `code` CharField(20, unique=True)
+  (line 24); `description` TextField(blank=True, default="") (line 25);
+  `created_at` auto (line 26).
 
-### Semester
+### Module — `apps/learning/models/module_model.py`
+- `course` — FK→Course, on_delete=CASCADE, related_name="modules"
+  (lines 19-23).
+- `title` CharField(255) (line 24); `description` TextField (line 25);
+  `order` PositiveIntegerField(default=0) (line 26).
 
-An academic period within a Career. Groups courses offered during a specific `year` and `period` (First, Second, or Summer). The `number` field defines the ordinal position within the career curriculum. A unique constraint on (career, number, year) prevents duplicate semester definitions. Uses the SoftDelete pattern. Database table: `semester`.
+### Lesson — `apps/learning/models/lesson_model.py`
+- `module` — FK→Module, on_delete=CASCADE, related_name="lessons"
+  (lines 19-23).
+- `title` CharField(255) (line 24); `content` TextField (line 25);
+  `order` PositiveIntegerField(default=0) (line 26).
 
-### Course
+### Resource — `apps/learning/models/resource_model.py`
+- `lesson` — FK→Lesson, CASCADE (lines 30-34).
+- `uploaded_by` — FK→AUTH_USER_MODEL, SET_NULL, nullable (lines 35-41).
+- `file` — FileField(upload_to=resource_upload_path) (line 42) where
+  `resource_upload_path` returns
+  `f"resources/{instance.lesson.module.course_id}/{filename}"`
+  (`apps/learning/services/storage_service.py:4-14`).
+- `resource_type` — CharField(max_length=10, choices) (lines 43-47):
+  `PDF`, `VIDEO`, `DOCUMENT`, `IMAGE`, `OTHER` (lines 23-28).
+- `title` CharField(255, blank=True, default="") (line 48); `created_at`
+  auto (line 49).
 
-An academic course optionally linked to a Semester (the FK is nullable, allowing standalone courses). Each Course has a unique `code` and serves as the anchor point for Modules (content structure), Quizzes (assessments), Evaluations (scoring records), and Certificates. Uses the SoftDelete pattern. Database table: `course`.
+### Evaluation — `apps/learning/models/evaluation_model.py`
+- `student` — FK→AUTH_USER_MODEL, CASCADE (lines 16-20).
+- `course` — FK→Course, CASCADE (lines 21-25).
+- `score` DecimalField(max_digits=6, decimal_places=2) (line 26);
+  `max_score` DecimalField(6,2) (line 27); `created_at` auto (line 28).
+- No soft-delete mixin.
 
-### Module
+### FailedTopic — `apps/learning/models/failed_topic_model.py`
+- `evaluation` — FK→Evaluation, CASCADE, related_name="failed_topics"
+  (lines 9-13).
+- `concept_id` CharField(100) (line 14) — must match a node name in the
+  AxiomEngine knowledge graph (see `04_architecture.md` § 2.2).
+- `score` / `max_score` DecimalField(6,2) (lines 15-16).
 
-A thematic section within a Course that groups related Lessons. The `order` field controls display sequence within the parent Course. Each Module contains one or more Lessons. Uses the SoftDelete pattern. Database table: `module`.
+### EvaluationTelemetry — `apps/learning/models/telemetry_model.py`
+- `evaluation` — **OneToOneField**→Evaluation, CASCADE,
+  related_name="telemetry" (lines 7-11).
+- `time_on_task_seconds` PositiveIntegerField(default=0) (line 12);
+  `clicks` PositiveIntegerField(default=0) (line 13).
 
-### Lesson
+### Certificate — `apps/learning/models/certificate_model.py`
+- `student` — FK→AUTH_USER_MODEL, CASCADE (lines 11-15).
+- `course` — FK→Course, CASCADE (lines 16-20).
+- `issued_at` DateTimeField(auto_now_add=True) (line 21).
+- `certificate_hash` CharField(max_length=64, unique=True, editable=False,
+  blank=True, default="") (lines 22-28).
+- `Meta.unique_together = [("student", "course")]`,
+  `ordering = ["-issued_at"]` (lines 32-33).
 
-The atomic pedagogical unit within a Module. Contains a `title` and `content` field (rich text or markdown) for the lesson body, plus an `order` field for sequencing within the Module. Lessons are the attachment point for both Resources (file-based learning materials) and Assignments (deliverable-based assessments). Uses the SoftDelete pattern. Database table: `lesson`.
+### Quiz — `apps/assessments/models/quiz_model.py`
+- `course` — FK→Course, CASCADE, related_name="quizzes" (lines 7-11).
+- `title` CharField(255) (line 12); `description` TextField (line 13);
+  `time_limit_minutes` PositiveIntegerField(default=30) (line 14);
+  `is_active` BooleanField(default=True) (line 15); `created_at` auto.
+- `Meta.db_table = "quiz"`, `verbose_name_plural = "Quizzes"`,
+  `ordering = ["-created_at"]` (lines 18-21).
 
-### Resource
+### Question — `apps/assessments/models/quiz_model.py`
+- `quiz` — FK→Quiz, CASCADE, related_name="questions" (lines 33-37).
+- `text` TextField (line 38); `concept_id` CharField(100) with
+  `help_text="Must match a node name in the AxiomEngine knowledge graph."`
+  (lines 39-42); `order` PositiveIntegerField(default=0) (line 43).
 
-A file-based learning resource attached to a Lesson and uploaded by a user (typically a Tutor). The `file` field stores the upload in S3 via a custom upload path. The `resource_type` field categorizes the file as PDF, VIDEO, DOCUMENT, IMAGE, or OTHER. Access is controlled through S3 pre-signed URLs. Uses the SoftDelete pattern. Database table: `resource`.
+### AnswerChoice — `apps/assessments/models/quiz_model.py`
+- `question` — FK→Question, CASCADE, related_name="choices" (lines 58-62).
+- `text` CharField(500) (line 63); `is_correct` BooleanField(default=False)
+  (line 64). `is_correct` is **never** exposed in the public `AnswerChoiceSerializer`
+  (`apps/assessments/serializers/quiz_serializer.py:6-11`).
 
-### Evaluation
+### QuizAttempt — `apps/assessments/models/attempt_model.py`
+- `student` — FK→AUTH_USER_MODEL, CASCADE (lines 14-18).
+- `quiz` — FK→Quiz, CASCADE (lines 19-23).
+- `start_time` auto (line 24); `end_time` nullable (line 25);
+  `final_score` DecimalField(6,2, nullable) (lines 26-28);
+  `is_submitted` BooleanField(default=False) (line 29);
+  `adaptive_plan` JSONField(nullable) (line 30).
 
-Records the outcome of a scored assessment for a specific student-course pair. Stores `score` and `max_score` as decimal fields (max_digits=6, decimal_places=2). Each Evaluation can have one EvaluationTelemetry record and multiple FailedTopic records. Created automatically by the ScoringService after a quiz is submitted and scored. Database table: `evaluation`.
+### AttemptAnswer — `apps/assessments/models/attempt_model.py`
+- `attempt` — FK→QuizAttempt, CASCADE, related_name="answers"
+  (lines 45-49).
+- `question` — FK→Question, CASCADE (lines 50-54).
+- `selected_choice` — FK→AnswerChoice, CASCADE (lines 55-59).
+- `Meta.unique_together = [("attempt", "question")]` (line 62).
 
-### FailedTopic
+### ProctoringLog — `apps/assessments/models/proctoring_model.py`
+- `attempt` — FK→QuizAttempt, CASCADE,
+  related_name="proctoring_logs" (lines 15-19).
+- `event_type` CharField(max_length=25, choices) (lines 20-23) with
+  values `tab_switched`, `face_not_detected`, `multiple_faces` (lines 10-13).
+- `timestamp` DateTimeField (line 24).
+- `severity_score` DecimalField(max_digits=4, decimal_places=2,
+  default=1.00) (lines 25-27).
 
-Represents a single concept that a student failed within an Evaluation. The `concept_id` field must match a node name in the AxiomEngine knowledge graph, establishing the bridge between assessment results and adaptive plan generation. Stores per-concept `score` and `max_score` to quantify the degree of failure. Database table: `failed_topic`.
+### Assignment — `apps/curriculum/models/assignment_model.py`
+- Extends `SoftDeleteMixin, models.Model` (line 7).
+- `lesson` — FK→Lesson, CASCADE, related_name="assignments"
+  (lines 23-27).
+- `created_by` — FK→AUTH_USER_MODEL, SET_NULL, nullable (lines 28-34).
+- `title` CharField(255) (line 35); `description` TextField (line 36);
+  `due_date` DateTimeField(nullable) (line 37); `max_score` DecimalField(6,2,
+  default=100) (line 38); `created_at` auto (line 39).
+- `Meta.db_table = "assignment"`,
+  `ordering = ["-created_at"]` (lines 44-48).
 
-### EvaluationTelemetry
-
-Client-side behavioral telemetry captured during an evaluation session, linked one-to-one with an Evaluation. Records `time_on_task_seconds` (total time spent) and `clicks` (interaction count). This data supports learning analytics and can inform future adaptive plan calibration. Database table: `evaluation_telemetry`.
-
-### Certificate
-
-Issued when a student satisfactorily completes a course. The `certificate_hash` is a SHA-256 hex digest computed by the CertificateGenerator service from the composite key (student_id, course_id, issued_at), providing a unique, verifiable credential identifier. The `unique_together` constraint on (student, course) ensures at most one certificate per student per course, making the issuance operation idempotent. Database table: `certificate`.
-
-### Quiz
-
-A timed assessment instrument linked to a specific Course. Key fields include `title`, `time_limit_minutes` (default 30), and `is_active` (controls whether students can take the quiz). Each Quiz contains multiple Questions. Database table: `quiz`.
-
-### Question
-
-A single multiple-choice question within a Quiz. The `concept_id` field maps directly to a node name in the AxiomEngine knowledge graph, enabling automatic identification of failed concepts after scoring. The `order` field controls display sequence. Each Question has multiple AnswerChoices. Database table: `question`.
-
-### AnswerChoice
-
-One of several possible answers for a Question. The `is_correct` boolean flag identifies the correct choice. Exactly one AnswerChoice per Question should have `is_correct = True`. The `text` field holds the answer content (up to 500 characters). Database table: `answer_choice`.
-
-### QuizAttempt
-
-Records a student's attempt at a specific Quiz. Tracks `start_time`, `end_time`, `final_score`, and `is_submitted` status. The `adaptive_plan` JSONField stores the structured study plan returned by AxiomEngine (or a fallback payload if the service was unavailable). Each attempt has multiple AttemptAnswers and may have ProctoringLog entries. Database table: `quiz_attempt`.
-
-### AttemptAnswer
-
-Links a student's selected AnswerChoice to a specific Question within a QuizAttempt. The `unique_together` constraint on (attempt, question) ensures a student can only answer each question once per attempt. Used by the ScoringService to compute results by comparing selected choices against correct answers. Database table: `attempt_answer`.
-
-### ProctoringLog
-
-An anti-cheat telemetry event captured by the frontend proctoring system (face-api.js or tab-visibility API) during a quiz attempt. The `event_type` field is one of: `tab_switched`, `face_not_detected`, or `multiple_faces`. Each event carries a `timestamp` and a `severity_score` (decimal, default 1.00). Logs are stored per-attempt and surfaced on tutor analytics dashboards for post-hoc integrity analysis. Database table: `proctoring_log`.
-
-### Assignment (curriculum app)
-
-A tutor-created deliverable attached to a specific Lesson. Defines a `title`, `description` with instructions, an optional `due_date` deadline, and a `max_score` (default 100). The `created_by` FK links to the Tutor who created the assignment. Students respond by uploading Submissions. Uses the SoftDelete pattern. Database table: `assignment`.
-
-### Submission (curriculum app)
-
-A student-uploaded file submission for a specific Assignment. The `file` field stores the upload in S3 via a custom upload path. Initially, `grade` and `graded_at` are null; a Tutor populates them through the grading endpoint. The `unique_together` constraint on (assignment, student) ensures one submission per student per assignment. Uses the SoftDelete pattern. Database table: `submission`.
+### Submission — `apps/curriculum/models/submission_model.py`
+- Extends `SoftDeleteMixin, models.Model` (line 8).
+- `assignment` — FK→Assignment, CASCADE,
+  related_name="submissions" (lines 23-27).
+- `student` — FK→AUTH_USER_MODEL, CASCADE,
+  related_name="submissions" (lines 28-32).
+- `file` — FileField(upload_to=submission_upload_path) (line 33).
+  `submission_upload_path` returns
+  `f"submissions/{instance.student_id}/{filename}"`
+  (`apps/curriculum/services/storage_service.py:4-14`).
+- `submitted_at` auto (line 34); `grade` DecimalField(6,2, nullable)
+  (lines 35-37); `graded_at` DateTimeField(nullable) (line 38).
+- `Meta.unique_together = [("assignment", "student")]` (line 46).

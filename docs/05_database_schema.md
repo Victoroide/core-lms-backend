@@ -1,359 +1,397 @@
 # 05 -- Database Schema
 
-> PUDS -- AxiomLMS Database Schema Reference
-> Version 1.0 | 2026-04-16
+> Every column below is transcribed from the corresponding
+> `apps/<app>/models/*_model.py` file. Line numbers cite the model
+> file. Column types reflect Django's mapping to PostgreSQL: `CharField`
+> → `VARCHAR`, `TextField` → `TEXT`, `DecimalField` →
+> `NUMERIC(precision, scale)`, `DateTimeField` → `TIMESTAMP WITH TIME
+> ZONE`, `JSONField` → `JSONB`, `FileField` → `VARCHAR(100)` (default
+> Django length) storing the S3 object key.
 
 ---
 
 ## 1. Overview
 
-The AxiomLMS database runs on PostgreSQL (NeonDB serverless in production, Docker ephemeral for development and CI). The schema spans three Django apps -- `learning`, `assessments`, and `curriculum` -- totaling 19 application tables plus Django's built-in auth and admin tables.
+Three Django apps back the schema:
 
-All timestamps are stored in UTC. All `VARCHAR` lengths are specified as maximum character counts. `DECIMAL` types use the notation `DECIMAL(precision, scale)`.
+- `apps.learning`: `lms_user`, `career`, `semester`, `course`, `module`,
+  `lesson`, `resource`, `evaluation`, `failed_topic`,
+  `evaluation_telemetry`, `certificate`
+- `apps.assessments`: `quiz`, `question`, `answer_choice`,
+  `quiz_attempt`, `attempt_answer`, `proctoring_log`
+- `apps.curriculum`: `assignment`, `submission`
+
+Plus Django's built-in `auth_*`, `django_*`, and
+`token_blacklist_*` tables from
+`rest_framework_simplejwt.token_blacklist`
+(`core_lms/settings.py:25`).
+
+All timestamps are UTC (`USE_TZ = True`, `core_lms/settings.py:108`).
 
 ---
 
 ## 2. Table Definitions
 
-### lms_user
+### lms_user — `apps/learning/models/user_model.py`
 
-Extends Django's built-in `auth_user` table via a one-to-one relationship or custom user model. Contains additional fields for the LMS domain.
+Extends Django's `AbstractUser`, so the row carries all default auth
+columns (`id`, `username`, `email`, `password`, `first_name`,
+`last_name`, `is_active`, `is_staff`, `is_superuser`, `date_joined`,
+`last_login`). Custom additions only:
 
-| Column         | Type          | Nullable | Default | Constraints                          |
-|----------------|---------------|----------|---------|--------------------------------------|
-| id             | INTEGER       | NO       | auto    | PRIMARY KEY                          |
-| role           | VARCHAR(7)    | NO       |         | Choices: student, tutor              |
-| vark_dominant  | VARCHAR(10)   | YES      | NULL    | VARK learning style (V, A, R, K)     |
-| (inherited)    |               |          |         | All fields from Django auth_user     |
+| Column | Type | Nullable | Default | Notes |
+|--------|------|----------|---------|-------|
+| role | VARCHAR(**10**) | NO | `"STUDENT"` | Choices: `"STUDENT"`, `"TUTOR"` (user_model.py:13-27) |
+| vark_dominant | VARCHAR(**15**) | NO | `"visual"` | Choices: `"visual"`, `"aural"`, `"read_write"`, `"kinesthetic"` (user_model.py:17-32) |
 
-Note: The `lms_user` table inherits all columns from Django's `auth_user` model, including `username`, `email`, `password`, `first_name`, `last_name`, `is_active`, `is_staff`, `is_superuser`, `date_joined`, and `last_login`.
-
----
-
-### career
-
-| Column      | Type          | Nullable | Default | Constraints           |
-|-------------|---------------|----------|---------|-----------------------|
-| id          | INTEGER       | NO       | auto    | PRIMARY KEY           |
-| name        | VARCHAR(200)  | NO       |         |                       |
-| code        | VARCHAR(20)   | NO       |         | UNIQUE                |
-| description | TEXT          | NO       |         |                       |
-| created_at  | TIMESTAMP     | NO       | now()   |                       |
-| is_deleted  | BOOLEAN       | NO       | FALSE   |                       |
-| deleted_at  | TIMESTAMP     | YES      | NULL    |                       |
+`AUTH_USER_MODEL = "learning.LMSUser"` (`core_lms/settings.py:96`).
 
 ---
 
-### semester
+### career — `apps/learning/models/career_model.py` (soft-delete)
 
-| Column      | Type          | Nullable | Default | Constraints                              |
-|-------------|---------------|----------|---------|------------------------------------------|
-| id          | INTEGER       | NO       | auto    | PRIMARY KEY                              |
-| career_id   | INTEGER       | NO       |         | FOREIGN KEY -> career(id)                |
-| name        | VARCHAR(100)  | NO       |         |                                          |
-| number      | INTEGER       | NO       |         |                                          |
-| year        | INTEGER       | NO       |         |                                          |
-| period      | VARCHAR(6)    | NO       |         |                                          |
-| created_at  | TIMESTAMP     | NO       | now()   |                                          |
-| is_deleted  | BOOLEAN       | NO       | FALSE   |                                          |
-| deleted_at  | TIMESTAMP     | YES      | NULL    |                                          |
+| Column | Type | Nullable | Default | Notes |
+|--------|------|----------|---------|-------|
+| id | BIGINT | NO | auto | PK |
+| name | VARCHAR(200) | NO | — | line 19 |
+| code | VARCHAR(20) | NO | — | **UNIQUE**, line 20 |
+| description | TEXT | NO | `""` | blank=True, line 21 |
+| created_at | TIMESTAMPTZ | NO | now() | auto_now_add, line 22 |
+| is_deleted | BOOLEAN | NO | FALSE | from `SoftDeleteMixin` |
+| deleted_at | TIMESTAMPTZ | YES | NULL | from `SoftDeleteMixin` |
 
-**Unique constraint:** `(career_id, number, year)`
+`Meta.ordering = ["code"]` (line 29).
 
 ---
 
-### course
+### semester — `apps/learning/models/semester_model.py` (soft-delete)
 
-| Column      | Type          | Nullable | Default | Constraints                    |
-|-------------|---------------|----------|---------|--------------------------------|
-| id          | INTEGER       | NO       | auto    | PRIMARY KEY                    |
-| semester_id | INTEGER       | YES      | NULL    | FOREIGN KEY -> semester(id)    |
-| name        | VARCHAR(200)  | NO       |         |                                |
-| code        | VARCHAR(20)   | NO       |         | UNIQUE                         |
-| description | TEXT          | NO       |         |                                |
-| created_at  | TIMESTAMP     | NO       | now()   |                                |
-| is_deleted  | BOOLEAN       | NO       | FALSE   |                                |
-| deleted_at  | TIMESTAMP     | YES      | NULL    |                                |
+| Column | Type | Nullable | Default | Notes |
+|--------|------|----------|---------|-------|
+| id | BIGINT | NO | auto | PK |
+| career_id | BIGINT | NO | — | FK → career(id), CASCADE, line 26-30 |
+| name | VARCHAR(100) | NO | — | line 31 |
+| number | INTEGER | NO | — | `PositiveIntegerField`, line 32 |
+| year | INTEGER | NO | — | `PositiveIntegerField`, line 33 |
+| period | VARCHAR(10) | NO | `"I"` | Choices: `"I"`, `"II"`, `"SUMMER"` (lines 21-24, 34-38) |
+| created_at | TIMESTAMPTZ | NO | now() | auto_now_add |
+| is_deleted | BOOLEAN | NO | FALSE |  |
+| deleted_at | TIMESTAMPTZ | YES | NULL |  |
 
----
-
-### module
-
-| Column      | Type          | Nullable | Default | Constraints                   |
-|-------------|---------------|----------|---------|-------------------------------|
-| id          | INTEGER       | NO       | auto    | PRIMARY KEY                   |
-| course_id   | INTEGER       | NO       |         | FOREIGN KEY -> course(id)     |
-| title       | VARCHAR(200)  | NO       |         |                               |
-| description | TEXT          | NO       |         |                               |
-| order       | INTEGER       | NO       |         |                               |
-| is_deleted  | BOOLEAN       | NO       | FALSE   |                               |
-| deleted_at  | TIMESTAMP     | YES      | NULL    |                               |
+**Unique constraint:** `(career_id, number, year)` (line 47).
+`Meta.ordering = ["career", "number"]` (line 46).
 
 ---
 
-### lesson
+### course — `apps/learning/models/course_model.py` (soft-delete)
 
-| Column      | Type          | Nullable | Default | Constraints                   |
-|-------------|---------------|----------|---------|-------------------------------|
-| id          | INTEGER       | NO       | auto    | PRIMARY KEY                   |
-| module_id   | INTEGER       | NO       |         | FOREIGN KEY -> module(id)     |
-| title       | VARCHAR(200)  | NO       |         |                               |
-| content     | TEXT          | NO       |         |                               |
-| order       | INTEGER       | NO       |         |                               |
-| is_deleted  | BOOLEAN       | NO       | FALSE   |                               |
-| deleted_at  | TIMESTAMP     | YES      | NULL    |                               |
-
----
-
-### resource
-
-| Column         | Type          | Nullable | Default | Constraints                      |
-|----------------|---------------|----------|---------|----------------------------------|
-| id             | INTEGER       | NO       | auto    | PRIMARY KEY                      |
-| lesson_id      | INTEGER       | NO       |         | FOREIGN KEY -> lesson(id)        |
-| uploaded_by_id | INTEGER       | YES      | NULL    | FOREIGN KEY -> lms_user(id)      |
-| file           | VARCHAR(100)  | NO       |         | File path (S3 storage backend)   |
-| resource_type  | VARCHAR(10)   | NO       |         | e.g., pdf, image, video          |
-| title          | VARCHAR(255)  | NO       |         |                                  |
-| created_at     | TIMESTAMP     | NO       | now()   |                                  |
-| is_deleted     | BOOLEAN       | NO       | FALSE   |                                  |
-| deleted_at     | TIMESTAMP     | YES      | NULL    |                                  |
+| Column | Type | Nullable | Default | Notes |
+|--------|------|----------|---------|-------|
+| id | BIGINT | NO | auto | PK |
+| semester_id | BIGINT | **YES** | NULL | FK → semester(id), **SET_NULL**, line 16-22 |
+| name | VARCHAR(200) | NO | — | line 23 |
+| code | VARCHAR(20) | NO | — | **UNIQUE**, line 24 |
+| description | TEXT | NO | `""` | blank=True |
+| created_at | TIMESTAMPTZ | NO | now() | auto_now_add |
+| is_deleted | BOOLEAN | NO | FALSE |  |
+| deleted_at | TIMESTAMPTZ | YES | NULL |  |
 
 ---
 
-### evaluation
+### module — `apps/learning/models/module_model.py` (soft-delete)
 
-| Column      | Type          | Nullable | Default | Constraints                      |
-|-------------|---------------|----------|---------|----------------------------------|
-| id          | INTEGER       | NO       | auto    | PRIMARY KEY                      |
-| student_id  | INTEGER       | NO       |         | FOREIGN KEY -> lms_user(id)      |
-| course_id   | INTEGER       | NO       |         | FOREIGN KEY -> course(id)        |
-| score       | DECIMAL(6,2)  | NO       |         |                                  |
-| max_score   | DECIMAL(6,2)  | NO       |         |                                  |
-| created_at  | TIMESTAMP     | NO       | now()   |                                  |
+| Column | Type | Nullable | Default | Notes |
+|--------|------|----------|---------|-------|
+| id | BIGINT | NO | auto | PK |
+| course_id | BIGINT | NO | — | FK → course(id), CASCADE, line 19-23 |
+| title | VARCHAR(255) | NO | — | line 24 |
+| description | TEXT | NO | `""` | blank=True |
+| order | INTEGER | NO | 0 | `PositiveIntegerField`, line 26 |
+| is_deleted | BOOLEAN | NO | FALSE |  |
+| deleted_at | TIMESTAMPTZ | YES | NULL |  |
 
----
-
-### failed_topic
-
-| Column        | Type          | Nullable | Default | Constraints                         |
-|---------------|---------------|----------|---------|-------------------------------------|
-| id            | INTEGER       | NO       | auto    | PRIMARY KEY                         |
-| evaluation_id | INTEGER       | NO       |         | FOREIGN KEY -> evaluation(id)       |
-| concept_id    | VARCHAR(100)  | NO       |         |                                     |
-| score         | DECIMAL(6,2)  | NO       |         |                                     |
-| max_score     | DECIMAL(6,2)  | NO       |         |                                     |
+`Meta.ordering = ["course", "order"]` (line 33).
 
 ---
 
-### evaluation_telemetry
+### lesson — `apps/learning/models/lesson_model.py` (soft-delete)
 
-| Column               | Type          | Nullable | Default | Constraints                                     |
-|----------------------|---------------|----------|---------|-------------------------------------------------|
-| id                   | INTEGER       | NO       | auto    | PRIMARY KEY                                     |
-| evaluation_id        | INTEGER       | NO       |         | FOREIGN KEY -> evaluation(id), UNIQUE (OneToOne)|
-| time_on_task_seconds | INTEGER       | NO       |         |                                                 |
-| clicks               | INTEGER       | NO       |         |                                                 |
-
-**Relationship:** One-to-one with `evaluation`. Each evaluation has at most one telemetry record.
-
----
-
-### certificate
-
-| Column           | Type          | Nullable | Default | Constraints                      |
-|------------------|---------------|----------|---------|----------------------------------|
-| id               | INTEGER       | NO       | auto    | PRIMARY KEY                      |
-| student_id       | INTEGER       | NO       |         | FOREIGN KEY -> lms_user(id)      |
-| course_id        | INTEGER       | NO       |         | FOREIGN KEY -> course(id)        |
-| issued_at        | TIMESTAMP     | NO       | now()   |                                  |
-| certificate_hash | VARCHAR(64)   | NO       |         | UNIQUE (SHA-256 hex digest)      |
-
-**Unique constraint:** `(student_id, course_id)` -- A student can hold at most one certificate per course.
+| Column | Type | Nullable | Default | Notes |
+|--------|------|----------|---------|-------|
+| id | BIGINT | NO | auto | PK |
+| module_id | BIGINT | NO | — | FK → module(id), CASCADE, line 19-23 |
+| title | VARCHAR(255) | NO | — | line 24 |
+| content | TEXT | NO | `""` | blank=True, line 25 |
+| order | INTEGER | NO | 0 | `PositiveIntegerField` |
+| is_deleted | BOOLEAN | NO | FALSE |  |
+| deleted_at | TIMESTAMPTZ | YES | NULL |  |
 
 ---
 
-### quiz
+### resource — `apps/learning/models/resource_model.py` (soft-delete)
 
-| Column             | Type          | Nullable | Default | Constraints                   |
-|--------------------|---------------|----------|---------|-------------------------------|
-| id                 | INTEGER       | NO       | auto    | PRIMARY KEY                   |
-| course_id          | INTEGER       | NO       |         | FOREIGN KEY -> course(id)     |
-| title              | VARCHAR(200)  | NO       |         |                               |
-| description        | TEXT          | NO       |         |                               |
-| time_limit_minutes | INTEGER       | NO       |         |                               |
-| is_active          | BOOLEAN       | NO       | TRUE    |                               |
-| created_at         | TIMESTAMP     | NO       | now()   |                               |
+| Column | Type | Nullable | Default | Notes |
+|--------|------|----------|---------|-------|
+| id | BIGINT | NO | auto | PK |
+| lesson_id | BIGINT | NO | — | FK → lesson(id), CASCADE (lines 30-34) |
+| uploaded_by_id | BIGINT | **YES** | NULL | FK → lms_user(id), **SET_NULL** (lines 35-41) |
+| file | VARCHAR(100) | NO | — | S3 object key; `upload_to=resource_upload_path` (line 42) |
+| resource_type | VARCHAR(10) | NO | `"OTHER"` | Choices: `PDF`, `VIDEO`, `DOCUMENT`, `IMAGE`, `OTHER` (lines 23-28, 43-47) |
+| title | VARCHAR(255) | NO | `""` | blank=True, default="" (line 48) |
+| created_at | TIMESTAMPTZ | NO | now() | auto_now_add |
+| is_deleted | BOOLEAN | NO | FALSE |  |
+| deleted_at | TIMESTAMPTZ | YES | NULL |  |
 
----
-
-### question
-
-| Column      | Type          | Nullable | Default | Constraints                   |
-|-------------|---------------|----------|---------|-------------------------------|
-| id          | INTEGER       | NO       | auto    | PRIMARY KEY                   |
-| quiz_id     | INTEGER       | NO       |         | FOREIGN KEY -> quiz(id)       |
-| text        | TEXT          | NO       |         |                               |
-| concept_id  | VARCHAR(100)  | NO       |         |                               |
-| order       | INTEGER       | NO       |         |                               |
+`Meta.ordering = ["-created_at"]` (line 56).
 
 ---
 
-### answer_choice
+### evaluation — `apps/learning/models/evaluation_model.py`
 
-| Column      | Type          | Nullable | Default | Constraints                    |
-|-------------|---------------|----------|---------|--------------------------------|
-| id          | INTEGER       | NO       | auto    | PRIMARY KEY                    |
-| question_id | INTEGER       | NO       |         | FOREIGN KEY -> question(id)    |
-| text        | VARCHAR(500)  | NO       |         |                                |
-| is_correct  | BOOLEAN       | NO       | FALSE   |                                |
+| Column | Type | Nullable | Default | Notes |
+|--------|------|----------|---------|-------|
+| id | BIGINT | NO | auto | PK |
+| student_id | BIGINT | NO | — | FK → lms_user(id), CASCADE (lines 16-20) |
+| course_id | BIGINT | NO | — | FK → course(id), CASCADE (lines 21-25) |
+| score | NUMERIC(6,2) | NO | — | line 26 |
+| max_score | NUMERIC(6,2) | NO | — | line 27 |
+| created_at | TIMESTAMPTZ | NO | now() | auto_now_add |
 
----
-
-### quiz_attempt
-
-| Column        | Type          | Nullable | Default | Constraints                      |
-|---------------|---------------|----------|---------|----------------------------------|
-| id            | INTEGER       | NO       | auto    | PRIMARY KEY                      |
-| student_id    | INTEGER       | NO       |         | FOREIGN KEY -> lms_user(id)      |
-| quiz_id       | INTEGER       | NO       |         | FOREIGN KEY -> quiz(id)          |
-| start_time    | TIMESTAMP     | NO       | now()   |                                  |
-| end_time      | TIMESTAMP     | YES      | NULL    |                                  |
-| final_score   | DECIMAL(6,2)  | YES      | NULL    |                                  |
-| is_submitted  | BOOLEAN       | NO       | FALSE   |                                  |
-| adaptive_plan | JSONB         | YES      | NULL    | Stored AxiomEngine response      |
+No soft-delete. `Meta.ordering = ["-created_at"]` (line 32).
 
 ---
 
-### attempt_answer
+### failed_topic — `apps/learning/models/failed_topic_model.py`
 
-| Column             | Type          | Nullable | Default | Constraints                          |
-|--------------------|---------------|----------|---------|--------------------------------------|
-| id                 | INTEGER       | NO       | auto    | PRIMARY KEY                          |
-| attempt_id         | INTEGER       | NO       |         | FOREIGN KEY -> quiz_attempt(id)      |
-| question_id        | INTEGER       | NO       |         | FOREIGN KEY -> question(id)          |
-| selected_choice_id | INTEGER       | NO       |         | FOREIGN KEY -> answer_choice(id)     |
-
-**Unique constraint:** `(attempt_id, question_id)` -- A student can answer each question at most once per attempt.
-
----
-
-### proctoring_log
-
-| Column         | Type          | Nullable | Default | Constraints                          |
-|----------------|---------------|----------|---------|--------------------------------------|
-| id             | INTEGER       | NO       | auto    | PRIMARY KEY                          |
-| attempt_id     | INTEGER       | NO       |         | FOREIGN KEY -> quiz_attempt(id)      |
-| event_type     | VARCHAR(20)   | NO       |         | e.g., tab_switch, face_absence       |
-| timestamp      | TIMESTAMP     | NO       |         |                                      |
-| severity_score | DECIMAL(3,2)  | NO       |         | Range 0.00 to 1.00                   |
+| Column | Type | Nullable | Default | Notes |
+|--------|------|----------|---------|-------|
+| id | BIGINT | NO | auto | PK |
+| evaluation_id | BIGINT | NO | — | FK → evaluation(id), CASCADE (lines 9-13) |
+| concept_id | VARCHAR(100) | NO | — | node name in AxiomEngine graph (line 14) |
+| score | NUMERIC(6,2) | NO | — | line 15 |
+| max_score | NUMERIC(6,2) | NO | — | line 16 |
 
 ---
 
-### assignment
+### evaluation_telemetry — `apps/learning/models/telemetry_model.py`
 
-| Column        | Type          | Nullable | Default | Constraints                      |
-|---------------|---------------|----------|---------|----------------------------------|
-| id            | INTEGER       | NO       | auto    | PRIMARY KEY                      |
-| lesson_id     | INTEGER       | NO       |         | FOREIGN KEY -> lesson(id)        |
-| created_by_id | INTEGER       | YES      | NULL    | FOREIGN KEY -> lms_user(id)      |
-| title         | VARCHAR(255)  | NO       |         |                                  |
-| description   | TEXT          | NO       |         |                                  |
-| due_date      | TIMESTAMP     | YES      | NULL    |                                  |
-| max_score     | DECIMAL(6,2)  | NO       |         |                                  |
-| created_at    | TIMESTAMP     | NO       | now()   |                                  |
-| is_deleted    | BOOLEAN       | NO       | FALSE   |                                  |
-| deleted_at    | TIMESTAMP     | YES      | NULL    |                                  |
+| Column | Type | Nullable | Default | Notes |
+|--------|------|----------|---------|-------|
+| id | BIGINT | NO | auto | PK |
+| evaluation_id | BIGINT | NO | — | **OneToOne FK → evaluation(id)**, CASCADE (lines 7-11), schema-level UNIQUE |
+| time_on_task_seconds | INTEGER | NO | 0 | `PositiveIntegerField`, line 12 |
+| clicks | INTEGER | NO | 0 | `PositiveIntegerField`, line 13 |
+
+One telemetry row per evaluation, enforced by the OneToOne unique index.
 
 ---
 
-### submission
+### certificate — `apps/learning/models/certificate_model.py`
 
-| Column        | Type          | Nullable | Default | Constraints                        |
-|---------------|---------------|---------|---------|------------------------------------|
-| id            | INTEGER       | NO       | auto    | PRIMARY KEY                        |
-| assignment_id | INTEGER       | NO       |         | FOREIGN KEY -> assignment(id)      |
-| student_id    | INTEGER       | NO       |         | FOREIGN KEY -> lms_user(id)        |
-| file          | VARCHAR(100)  | NO       |         | File path (S3 storage backend)     |
-| submitted_at  | TIMESTAMP     | NO       | now()   |                                    |
-| grade         | DECIMAL(6,2)  | YES      | NULL    |                                    |
-| graded_at     | TIMESTAMP     | YES      | NULL    |                                    |
-| is_deleted    | BOOLEAN       | NO       | FALSE   |                                    |
-| deleted_at    | TIMESTAMP     | YES      | NULL    |                                    |
+| Column | Type | Nullable | Default | Notes |
+|--------|------|----------|---------|-------|
+| id | BIGINT | NO | auto | PK |
+| student_id | BIGINT | NO | — | FK → lms_user(id), CASCADE (lines 11-15) |
+| course_id | BIGINT | NO | — | FK → course(id), CASCADE (lines 16-20) |
+| issued_at | TIMESTAMPTZ | NO | now() | auto_now_add (line 21) |
+| certificate_hash | VARCHAR(64) | NO | `""` | **UNIQUE**, editable=False, blank=True (lines 22-28) |
 
-**Unique constraint:** `(assignment_id, student_id)` -- A student can submit at most once per assignment.
+**Unique constraint:** `(student_id, course_id)` (line 32).
+`Meta.ordering = ["-issued_at"]` (line 33).
+
+---
+
+### quiz — `apps/assessments/models/quiz_model.py`
+
+| Column | Type | Nullable | Default | Notes |
+|--------|------|----------|---------|-------|
+| id | BIGINT | NO | auto | PK |
+| course_id | BIGINT | NO | — | FK → course(id), CASCADE (lines 7-11) |
+| title | VARCHAR(255) | NO | — | line 12 |
+| description | TEXT | NO | `""` | blank=True |
+| time_limit_minutes | INTEGER | NO | 30 | `PositiveIntegerField`, line 14 |
+| is_active | BOOLEAN | NO | TRUE | line 15 |
+| created_at | TIMESTAMPTZ | NO | now() | auto_now_add |
+
+`Meta.ordering = ["-created_at"]` (line 21).
+
+---
+
+### question — `apps/assessments/models/quiz_model.py`
+
+| Column | Type | Nullable | Default | Notes |
+|--------|------|----------|---------|-------|
+| id | BIGINT | NO | auto | PK |
+| quiz_id | BIGINT | NO | — | FK → quiz(id), CASCADE (lines 33-37) |
+| text | TEXT | NO | — | line 38 |
+| concept_id | VARCHAR(100) | NO | — | Maps to an AxiomEngine knowledge-graph node (lines 39-42) |
+| order | INTEGER | NO | 0 | `PositiveIntegerField` |
+
+`Meta.ordering = ["order"]` (line 47).
+
+---
+
+### answer_choice — `apps/assessments/models/quiz_model.py`
+
+| Column | Type | Nullable | Default | Notes |
+|--------|------|----------|---------|-------|
+| id | BIGINT | NO | auto | PK |
+| question_id | BIGINT | NO | — | FK → question(id), CASCADE (lines 58-62) |
+| text | VARCHAR(500) | NO | — | line 63 |
+| is_correct | BOOLEAN | NO | FALSE | line 64 |
+
+> `is_correct` is **never** exposed through the public API. The
+> `AnswerChoiceSerializer` at `apps/assessments/serializers/quiz_serializer.py:6-11`
+> uses `fields = ("id", "text")` only.
+
+---
+
+### quiz_attempt — `apps/assessments/models/attempt_model.py`
+
+| Column | Type | Nullable | Default | Notes |
+|--------|------|----------|---------|-------|
+| id | BIGINT | NO | auto | PK |
+| student_id | BIGINT | NO | — | FK → lms_user(id), CASCADE (lines 14-18) |
+| quiz_id | BIGINT | NO | — | FK → quiz(id), CASCADE (lines 19-23) |
+| start_time | TIMESTAMPTZ | NO | now() | auto_now_add (line 24) |
+| end_time | TIMESTAMPTZ | YES | NULL | line 25 |
+| final_score | NUMERIC(6,2) | YES | NULL | lines 26-28 |
+| is_submitted | BOOLEAN | NO | FALSE | line 29 |
+| adaptive_plan | JSONB | YES | NULL | Stored AxiomEngine response or fallback envelope (line 30) |
+
+`Meta.ordering = ["-start_time"]` (line 33).
+
+---
+
+### attempt_answer — `apps/assessments/models/attempt_model.py`
+
+| Column | Type | Nullable | Default | Notes |
+|--------|------|----------|---------|-------|
+| id | BIGINT | NO | auto | PK |
+| attempt_id | BIGINT | NO | — | FK → quiz_attempt(id), CASCADE (lines 45-49) |
+| question_id | BIGINT | NO | — | FK → question(id), CASCADE (lines 50-54) |
+| selected_choice_id | BIGINT | NO | — | FK → answer_choice(id), CASCADE (lines 55-59) |
+
+**Unique constraint:** `(attempt_id, question_id)` (line 62).
+
+---
+
+### proctoring_log — `apps/assessments/models/proctoring_model.py`
+
+| Column | Type | Nullable | Default | Notes |
+|--------|------|----------|---------|-------|
+| id | BIGINT | NO | auto | PK |
+| attempt_id | BIGINT | NO | — | FK → quiz_attempt(id), CASCADE (lines 15-19) |
+| event_type | VARCHAR(**25**) | NO | — | Choices: `"tab_switched"`, `"face_not_detected"`, `"multiple_faces"` (lines 10-13, 20-23) |
+| timestamp | TIMESTAMPTZ | NO | — | line 24 |
+| severity_score | NUMERIC(4,2) | NO | 1.00 | line 25-27 |
+
+`Meta.ordering = ["timestamp"]` (line 31).
+
+---
+
+### assignment — `apps/curriculum/models/assignment_model.py` (soft-delete)
+
+| Column | Type | Nullable | Default | Notes |
+|--------|------|----------|---------|-------|
+| id | BIGINT | NO | auto | PK |
+| lesson_id | BIGINT | NO | — | FK → lesson(id), CASCADE (lines 23-27) |
+| created_by_id | BIGINT | **YES** | NULL | FK → lms_user(id), **SET_NULL** (lines 28-34) |
+| title | VARCHAR(255) | NO | — | line 35 |
+| description | TEXT | NO | `""` | blank=True |
+| due_date | TIMESTAMPTZ | YES | NULL | line 37 |
+| max_score | NUMERIC(6,2) | NO | 100 | line 38 |
+| created_at | TIMESTAMPTZ | NO | now() | auto_now_add |
+| is_deleted | BOOLEAN | NO | FALSE |  |
+| deleted_at | TIMESTAMPTZ | YES | NULL |  |
+
+`Meta.ordering = ["-created_at"]` (line 47).
+
+---
+
+### submission — `apps/curriculum/models/submission_model.py` (soft-delete)
+
+| Column | Type | Nullable | Default | Notes |
+|--------|------|----------|---------|-------|
+| id | BIGINT | NO | auto | PK |
+| assignment_id | BIGINT | NO | — | FK → assignment(id), CASCADE (lines 23-27) |
+| student_id | BIGINT | NO | — | FK → lms_user(id), CASCADE (lines 28-32) |
+| file | VARCHAR(100) | NO | — | S3 object key; `upload_to=submission_upload_path` (line 33) |
+| submitted_at | TIMESTAMPTZ | NO | now() | auto_now_add (line 34) |
+| grade | NUMERIC(6,2) | YES | NULL | lines 35-37 |
+| graded_at | TIMESTAMPTZ | YES | NULL | line 38 |
+| is_deleted | BOOLEAN | NO | FALSE |  |
+| deleted_at | TIMESTAMPTZ | YES | NULL |  |
+
+**Unique constraint:** `(assignment_id, student_id)` (line 46).
+`Meta.ordering = ["-submitted_at"]` (line 45).
 
 ---
 
 ## 3. Entity Relationship Summary
 
 ```
-career 1---* semester 1---* course 1---* module 1---* lesson 1---* resource
-                                   |                          |
-                                   |                          +---* assignment 1---* submission
-                                   |
-                                   +---* quiz 1---* question 1---* answer_choice
-                                   |
-                                   +---* evaluation 1---* failed_topic
-                                   |              |
-                                   |              +---1 evaluation_telemetry
-                                   |
-                                   +---* certificate
+career 1 → * semester 1 → * course 1 → * module 1 → * lesson 1 → * resource
+                              |                         |
+                              |                         +─→ * assignment 1 → * submission
+                              |
+                              +─→ * quiz 1 → * question 1 → * answer_choice
+                              |
+                              +─→ * evaluation 1 → * failed_topic
+                              |                  \
+                              |                   +─1 evaluation_telemetry (OneToOne)
+                              |
+                              +─→ * certificate
 
-quiz_attempt *---1 quiz
-quiz_attempt *---1 lms_user (student)
-quiz_attempt 1---* attempt_answer
-quiz_attempt 1---* proctoring_log
+quiz_attempt  * → 1 quiz       (CASCADE)
+quiz_attempt  * → 1 lms_user   (CASCADE, as student)
+quiz_attempt  1 → * attempt_answer
+quiz_attempt  1 → * proctoring_log
 
-attempt_answer *---1 question
-attempt_answer *---1 answer_choice
+attempt_answer * → 1 question        (CASCADE)
+attempt_answer * → 1 answer_choice   (CASCADE)
 
-evaluation *---1 lms_user (student)
-evaluation *---1 course
-
-certificate *---1 lms_user (student)
-certificate *---1 course
-
-submission *---1 lms_user (student)
-resource *---1 lms_user (uploaded_by)
-assignment *---1 lms_user (created_by)
+evaluation    * → 1 lms_user   (CASCADE, as student)
+certificate   * → 1 lms_user   (CASCADE, as student)
+submission    * → 1 lms_user   (CASCADE, as student)
+assignment    * → 1 lms_user   (SET_NULL, as created_by)
+resource      * → 1 lms_user   (SET_NULL, as uploaded_by)
 ```
 
 ---
 
-## 4. Soft Delete Policy
+## 4. Soft-delete Policy
 
-Eight models implement soft deletion:
+Eight models include `is_deleted` and `deleted_at`:
 
-1. `career`
-2. `semester`
-3. `course`
-4. `module`
-5. `lesson`
-6. `resource`
-7. `assignment`
-8. `submission`
+1. career
+2. semester
+3. course
+4. module
+5. lesson
+6. resource
+7. assignment
+8. submission
 
-Each soft-deletable model includes two fields:
+All use `SoftDeleteMixin` with two managers (`core_lms/mixins.py`):
+- `objects = SoftDeleteManager()` — filters `is_deleted=False`
+  automatically.
+- `all_objects = AllObjectsManager()` — returns every row.
 
-| Field       | Type       | Default | Purpose                                    |
-|-------------|------------|---------|--------------------------------------------|
-| is_deleted  | BOOLEAN    | FALSE   | Marks the record as logically deleted       |
-| deleted_at  | TIMESTAMP  | NULL    | Records the moment of deletion              |
-
-**Manager behavior:**
-
-- `SoftDeleteManager` (default manager) -- Automatically appends `WHERE is_deleted = FALSE` to all querysets. This is the default manager assigned to all soft-deletable models, ensuring that application code never accidentally surfaces deleted records.
-- `AllObjectsManager` -- Returns all records regardless of `is_deleted` status. Used exclusively for administrative tasks, data seeding, and migration scripts that must operate on the full dataset.
-
-**Delete operation:** Calling `.delete()` on a soft-deletable model instance sets `is_deleted = TRUE` and `deleted_at = now()` instead of issuing a SQL `DELETE` statement. Hard deletion requires direct database access or explicit use of `AllObjectsManager`.
+`instance.delete()` sets `is_deleted=True` and
+`deleted_at = now()` rather than issuing SQL `DELETE`.
+`instance.hard_delete()` is available for real deletion (see
+`core_lms/mixins.py`).
 
 ---
 
 ## 5. Migration Policy
 
-- Migrations are generated via `python manage.py makemigrations` and committed to version control.
-- Migrations are applied via `python manage.py migrate`.
-- Production deployments run migrations as a separate step before starting the application server. The application never auto-migrates on startup in production.
-- Each app maintains its own `migrations/` directory with a sequential numbering scheme.
-- Backward-incompatible schema changes (column removal, type narrowing) require a multi-step migration strategy: add the new column, backfill, deploy code that uses the new column, then remove the old column in a subsequent release.
+- Migrations live in `apps/<app>/migrations/` and are committed to git.
+- Production applies migrations as a separate step before
+  starting the app container. The production `Dockerfile:20` does
+  **not** run `migrate` — it runs `collectstatic` then `gunicorn`. See
+  `08_deployment.md`.
+- `test` environment (`DJANGO_ENV=test`) targets the Docker Postgres
+  service and applies migrations on test-runner startup (standard
+  Django behavior).

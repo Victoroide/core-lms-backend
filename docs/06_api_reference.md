@@ -1,1055 +1,698 @@
 # 06 -- API Reference
 
-> PUDS -- AxiomLMS REST API Reference
-> Version 1.0 | 2026-04-16
-
----
+> Every endpoint in this document maps to a concrete viewset action in
+> the source. URLs are sourced from `core_lms/urls.py` and
+> `apps/*/urls.py`; permissions, request bodies, and response shapes
+> come from the viewset and serializer files cited inline.
 
 ## General Conventions
 
-- **Base URL:** `/api/v1/`
-- **Authentication:** JWT Bearer token in the `Authorization` header (`Authorization: Bearer <access_token>`), except where noted as `AllowAny`.
-- **Content-Type:** `application/json` for all non-file endpoints. `multipart/form-data` for file uploads.
-- **Pagination:** All list endpoints use `PageNumberPagination` with `PAGE_SIZE=20`.
-- **List response envelope:**
+- **Base URL:** `/api/v1/` (mounted by `core_lms/urls.py:46-48`).
+- **Authentication:** JWT Bearer in `Authorization: Bearer <access>`
+  (`core_lms/settings.py:118-123`, `SIMPLE_JWT.AUTH_HEADER_TYPES =
+  ("Bearer",)` on line 138), except where the viewset sets
+  `permission_classes = [AllowAny]`.
+- **Content-Type:** `application/json` by default; `multipart/form-data`
+  for file uploads (resource, submission).
+- **Pagination:** `rest_framework.pagination.PageNumberPagination`,
+  `PAGE_SIZE=20` (`core_lms/settings.py:115-117`). List responses:
 
-```json
-{
-  "count": 142,
-  "next": "http://host/api/v1/resource/?page=2",
-  "previous": null,
-  "results": [...]
-}
-```
+  ```json
+  { "count": 142, "next": ".../?page=2", "previous": null, "results": [...] }
+  ```
 
-- **Soft-deleted records** are excluded from list and detail responses by default. Pass `?is_deleted=true` where the filter is supported to include them.
-- **Error responses** follow DRF conventions: `{"detail": "Error message"}` for single errors, `{"field_name": ["Error message"]}` for validation errors.
+- **Default filter backend:** `django_filter.DjangoFilterBackend`
+  (`core_lms/settings.py:124-126`). Endpoints that expose filters list
+  them under "Filters". Soft-delete–aware endpoints accept
+  `?is_deleted=true` or `?is_deleted=false`.
+- **Error envelope:** DRF default `{"detail": "..."}` for standard
+  errors; viewsets that return custom errors use
+  `{"error": "<code>", "details": "..."}` (e.g. certificate,
+  attempts, proctoring). Unhandled 500s pass through
+  `core_lms.exception_handler.custom_exception_handler` as
+  `{"detail": "An unexpected error occurred. Please try again later."}`.
 
 ---
 
 ## 1. Authentication
 
-### POST /api/v1/auth/token/
+Both auth endpoints live in `apps/learning/viewsets/auth_viewset.py`;
+routes are registered directly in `core_lms/urls.py:35-42`.
 
-Obtain a JWT access/refresh token pair.
+### POST `/api/v1/auth/token/` — obtain token pair
 
-| Attribute     | Value                    |
-|---------------|--------------------------|
-| Permission    | AllowAny                 |
-| Content-Type  | application/json         |
+| Attribute | Value |
+|-----------|-------|
+| View | `RateLimitedTokenView` (`auth_viewset.py:11`) |
+| Permission | `AllowAny` (inherited from SimpleJWT) |
+| Rate limit | `@ratelimit(key="ip", rate="10/m", method="POST", block=False)` (`auth_viewset.py:35-37`); 429 when exceeded |
 
-**Request Body:**
-
+Request body:
 ```json
-{
-  "username": "string",
-  "password": "string"
-}
+{ "username": "string", "password": "string" }
 ```
 
-**Success Response (200):**
-
+Response 200:
 ```json
-{
-  "access": "eyJ...",
-  "refresh": "eyJ..."
-}
+{ "access": "eyJ...", "refresh": "eyJ..." }
 ```
 
-**Status Codes:**
+Status codes: 200, 401 (bad credentials), 429 (rate limit).
 
-| Code | Meaning                              |
-|------|--------------------------------------|
-| 200  | Token pair returned                  |
-| 401  | Invalid credentials                  |
+### POST `/api/v1/auth/token/refresh/` — refresh access token
 
----
+| Attribute | Value |
+|-----------|-------|
+| View | `TaggedTokenRefreshView` (`auth_viewset.py:58`) |
+| Permission | `AllowAny` |
 
-### POST /api/v1/auth/token/refresh/
-
-Refresh an expired access token using a valid refresh token.
-
-| Attribute     | Value                    |
-|---------------|--------------------------|
-| Permission    | AllowAny                 |
-| Content-Type  | application/json         |
-
-**Request Body:**
-
+Request body:
 ```json
-{
-  "refresh": "eyJ..."
-}
+{ "refresh": "eyJ..." }
 ```
 
-**Success Response (200):**
-
+Response 200 (with rotation enabled — `core_lms/settings.py:136-137`):
 ```json
-{
-  "access": "eyJ..."
-}
+{ "access": "eyJ...", "refresh": "eyJ..." }
 ```
 
-**Status Codes:**
+The old refresh token is blacklisted after rotation.
 
-| Code | Meaning                              |
-|------|--------------------------------------|
-| 200  | New access token returned            |
-| 401  | Refresh token invalid or expired     |
-
----
-
-### Token Lifetime and Rotation
-
-- Access token lifetime: **30 minutes**
-- Refresh token lifetime: **7 days**
-- Refresh tokens rotate on use. The previous refresh token is **blacklisted immediately** after rotation. The frontend must persist the new refresh token returned in each `/token/refresh/` response.
-- After 7 days of inactivity, the user must re-authenticate via `/token/`.
-- The `/token/` endpoint is rate-limited to **10 POST requests per minute per IP**. Exceeding the limit returns HTTP 429.
+### Token lifetimes
+- Access token: **30 minutes** (`core_lms/settings.py:134`).
+- Refresh token: **7 days** (`core_lms/settings.py:135`).
+- `ROTATE_REFRESH_TOKENS=True`, `BLACKLIST_AFTER_ROTATION=True`.
 
 ---
 
 ## 2. Academic Ontology
 
-All academic ontology endpoints follow a consistent CRUD pattern. Read operations (GET) require `IsAuthenticated`. Write operations (POST, PUT, PATCH, DELETE) require `IsTutor`.
+All ontology viewsets are `ModelViewSet` and apply
+`get_permissions()` that returns `[IsTutor()]` for mutations and
+`[IsAuthenticated()]` for reads (pattern identical across every file
+listed below).
 
-### /api/v1/careers/
+| Resource | Prefix | ViewSet |
+|----------|--------|---------|
+| Career | `/api/v1/careers/` | `CareerViewSet` (`apps/learning/viewsets/career_viewset.py:11`) |
+| Semester | `/api/v1/semesters/` | `SemesterViewSet` (`semester_viewset.py:11`) |
+| Course | `/api/v1/courses/` | `CourseViewSet` (`course_viewset.py:12`) |
+| Module | `/api/v1/modules/` | `ModuleViewSet` (`module_viewset.py:11`) |
+| Lesson | `/api/v1/lessons/` | `LessonViewSet` (`lesson_viewset.py:11`) |
 
-Manage academic careers (degree programs).
+Standard CRUD URLs for each: `GET /` (list),
+`POST /` (create, IsTutor), `GET /{id}/` (retrieve),
+`PUT /{id}/` (update, IsTutor), `PATCH /{id}/` (partial_update,
+IsTutor), `DELETE /{id}/` (destroy, IsTutor).
 
-| Method | Path                    | Permission      | Description          |
-|--------|-------------------------|-----------------|----------------------|
-| GET    | /api/v1/careers/        | IsAuthenticated | List all careers     |
-| POST   | /api/v1/careers/        | IsTutor         | Create a career      |
-| GET    | /api/v1/careers/{id}/   | IsAuthenticated | Retrieve a career    |
-| PUT    | /api/v1/careers/{id}/   | IsTutor         | Full update          |
-| PATCH  | /api/v1/careers/{id}/   | IsTutor         | Partial update       |
-| DELETE | /api/v1/careers/{id}/   | IsTutor         | Soft delete          |
+### 2.1 Careers
 
-**Filters:** `is_deleted`
+`CareerViewSet` uses `CareerSerializer` on list/create/update and
+`CareerDetailSerializer` on retrieve
+(`apps/learning/serializers/career_serializer.py:6, 19`).
 
-**Request Body (POST/PUT):**
+**Filters:** `is_deleted` (`career_viewset.py:22`).
 
+**Request / list response body (`CareerSerializer`):**
+```json
+{ "id": 1, "name": "...", "code": "...", "description": "...", "created_at": "..." }
+```
+`read_only_fields = ["id", "created_at"]`.
+
+**Retrieve response (`CareerDetailSerializer`)** adds a `semesters`
+method field returning a list serialized by `SemesterSerializer`
+(`career_serializer.py:26-44`):
 ```json
 {
-  "name": "string (max 200)",
-  "code": "string (max 20, unique)",
-  "description": "string"
+  "id": 1, "name": "...", "code": "...", "description": "...",
+  "created_at": "...",
+  "semesters": [{ /* SemesterSerializer */ }]
 }
 ```
 
-**Response (200/201):**
+### 2.2 Semesters
 
-```json
-{
-  "id": 1,
-  "name": "Systems Engineering",
-  "code": "SIS",
-  "description": "...",
-  "created_at": "2026-04-16T12:00:00Z",
-  "is_deleted": false,
-  "deleted_at": null
-}
-```
+`SemesterSerializer` fields:
+`["id", "career", "name", "number", "year", "period", "created_at"]`;
+read-only: `["id", "created_at"]`
+(`apps/learning/serializers/semester_serializer.py:14-24`).
 
-**Status Codes:**
+**Filters:** `career`, `is_deleted` (`semester_viewset.py:24`).
 
-| Code | Meaning                              |
-|------|--------------------------------------|
-| 200  | Success (GET, PUT, PATCH)            |
-| 201  | Created (POST)                       |
-| 204  | Deleted (DELETE)                     |
-| 400  | Validation error                     |
-| 401  | Not authenticated                    |
-| 403  | Not a tutor (write operations)       |
-| 404  | Career not found                     |
+`period` choices: `"I"`, `"II"`, `"SUMMER"`
+(`apps/learning/models/semester_model.py:21-24`).
 
----
+### 2.3 Courses
 
-### /api/v1/semesters/
-
-Manage semesters within a career.
-
-| Method | Path                      | Permission      | Description           |
-|--------|---------------------------|-----------------|---------------------- |
-| GET    | /api/v1/semesters/        | IsAuthenticated | List all semesters    |
-| POST   | /api/v1/semesters/        | IsTutor         | Create a semester     |
-| GET    | /api/v1/semesters/{id}/   | IsAuthenticated | Retrieve a semester   |
-| PUT    | /api/v1/semesters/{id}/   | IsTutor         | Full update           |
-| PATCH  | /api/v1/semesters/{id}/   | IsTutor         | Partial update        |
-| DELETE | /api/v1/semesters/{id}/   | IsTutor         | Soft delete           |
-
-**Filters:** `career`, `is_deleted`
-
-**Request Body (POST/PUT):**
-
-```json
-{
-  "career": 1,
-  "name": "string (max 100)",
-  "number": 1,
-  "year": 2026,
-  "period": "string (max 6)"
-}
-```
-
-**Response (200/201):**
-
-```json
-{
-  "id": 1,
-  "career": 1,
-  "name": "First Semester",
-  "number": 1,
-  "year": 2026,
-  "period": "I-2026",
-  "created_at": "2026-04-16T12:00:00Z",
-  "is_deleted": false,
-  "deleted_at": null
-}
-```
-
-**Status Codes:** Same as careers.
-
----
-
-### /api/v1/courses/
-
-Manage courses within a semester.
-
-| Method | Path                    | Permission      | Description         |
-|--------|-------------------------|-----------------|---------------------|
-| GET    | /api/v1/courses/        | IsAuthenticated | List all courses    |
-| POST   | /api/v1/courses/        | IsTutor         | Create a course     |
-| GET    | /api/v1/courses/{id}/   | IsAuthenticated | Retrieve a course   |
-| PUT    | /api/v1/courses/{id}/   | IsTutor         | Full update         |
-| PATCH  | /api/v1/courses/{id}/   | IsTutor         | Partial update      |
-| DELETE | /api/v1/courses/{id}/   | IsTutor         | Soft delete         |
+Two serializers (`course_viewset.get_serializer_class`):
+- List/create/update: `CourseListSerializer` with fields
+  `["id", "semester", "name", "code", "description", "created_at"]`
+  (`course_serializer.py:8-18`).
+- Retrieve: `CourseDetailSerializer` — embeds a nested `semester`
+  (full `SemesterSerializer`) and a `modules` method field that
+  recursively embeds lessons (via `LessonDetailSerializer`)
+  (`course_serializer.py:21-65`).
 
 **Filters:** `semester`, `semester__career`, `is_deleted`
+(`course_viewset.py:26`).
 
-**Request Body (POST/PUT):**
+`CourseViewSet.retrieve` applies `prefetch_related(
+"modules__lessons__resources")` to avoid N+1
+(`course_viewset.py:67-89`).
 
-```json
-{
-  "semester": 1,
-  "name": "string (max 200)",
-  "code": "string (max 20, unique)",
-  "description": "string"
-}
-```
+### 2.4 Modules
 
-**Response (200/201):**
+`ModuleSerializer` fields:
+`["id", "course", "title", "description", "order"]`
+(`module_serializer.py:14-16`).
 
-```json
-{
-  "id": 1,
-  "semester": 1,
-  "name": "Introduction to Programming",
-  "code": "CS101",
-  "description": "...",
-  "created_at": "2026-04-16T12:00:00Z",
-  "is_deleted": false,
-  "deleted_at": null
-}
-```
+**Filters:** `course`, `is_deleted` (`module_viewset.py:24`).
 
-**Status Codes:** Same as careers.
+### 2.5 Lessons
 
----
+Two serializers (`lesson_viewset.get_serializer_class`):
+- List/create/update: `LessonSerializer` —
+  `["id", "module", "title", "content", "order"]`
+  (`lesson_serializer.py:14-16`).
+- Retrieve: `LessonDetailSerializer` — adds `resources` method field
+  that returns the nested `ResourceSerializer` list
+  (`lesson_serializer.py:19-44`).
 
-### /api/v1/modules/
-
-Manage modules within a course.
-
-| Method | Path                    | Permission      | Description         |
-|--------|-------------------------|-----------------|---------------------|
-| GET    | /api/v1/modules/        | IsAuthenticated | List all modules    |
-| POST   | /api/v1/modules/        | IsTutor         | Create a module     |
-| GET    | /api/v1/modules/{id}/   | IsAuthenticated | Retrieve a module   |
-| PUT    | /api/v1/modules/{id}/   | IsTutor         | Full update         |
-| PATCH  | /api/v1/modules/{id}/   | IsTutor         | Partial update      |
-| DELETE | /api/v1/modules/{id}/   | IsTutor         | Soft delete         |
-
-**Filters:** `course`, `is_deleted`
-
-**Request Body (POST/PUT):**
-
-```json
-{
-  "course": 1,
-  "title": "string (max 200)",
-  "description": "string",
-  "order": 1
-}
-```
-
-**Response (200/201):**
-
-```json
-{
-  "id": 1,
-  "course": 1,
-  "title": "Variables and Data Types",
-  "description": "...",
-  "order": 1,
-  "is_deleted": false,
-  "deleted_at": null
-}
-```
-
-**Status Codes:** Same as careers.
-
----
-
-### /api/v1/lessons/
-
-Manage lessons within a module.
-
-| Method | Path                    | Permission      | Description         |
-|--------|-------------------------|-----------------|---------------------|
-| GET    | /api/v1/lessons/        | IsAuthenticated | List all lessons    |
-| POST   | /api/v1/lessons/        | IsTutor         | Create a lesson     |
-| GET    | /api/v1/lessons/{id}/   | IsAuthenticated | Retrieve a lesson   |
-| PUT    | /api/v1/lessons/{id}/   | IsTutor         | Full update         |
-| PATCH  | /api/v1/lessons/{id}/   | IsTutor         | Partial update      |
-| DELETE | /api/v1/lessons/{id}/   | IsTutor         | Soft delete         |
-
-**Filters:** `module`, `is_deleted`
-
-**Request Body (POST/PUT):**
-
-```json
-{
-  "module": 1,
-  "title": "string (max 200)",
-  "content": "string",
-  "order": 1
-}
-```
-
-**Response (200/201):**
-
-```json
-{
-  "id": 1,
-  "module": 1,
-  "title": "Integer Types",
-  "content": "...",
-  "order": 1,
-  "is_deleted": false,
-  "deleted_at": null
-}
-```
-
-**Status Codes:** Same as careers.
+**Filters:** `module`, `is_deleted` (`lesson_viewset.py:23`).
 
 ---
 
 ## 3. Resources
 
-### /api/v1/resources/
+### `/api/v1/resources/` — `ResourceViewSet` (`resource_viewset.py:11`)
 
-Manage lesson-attached resources (files stored on S3).
-
-| Method | Path                      | Permission      | Description          |
-|--------|---------------------------|-----------------|----------------------|
-| GET    | /api/v1/resources/        | IsAuthenticated | List all resources   |
-| POST   | /api/v1/resources/        | IsTutor         | Upload a resource    |
-| GET    | /api/v1/resources/{id}/   | IsAuthenticated | Retrieve a resource  |
-| PUT    | /api/v1/resources/{id}/   | IsTutor         | Full update          |
-| PATCH  | /api/v1/resources/{id}/   | IsTutor         | Partial update       |
-| DELETE | /api/v1/resources/{id}/   | IsTutor         | Soft delete          |
+CRUD via `ModelViewSet`; `IsAuthenticated` for reads, `IsTutor` for
+writes (`resource_viewset.py:29-37`). Serializer:
+`ResourceSerializer` with fields
+`["id", "lesson", "uploaded_by", "file", "resource_type", "title",
+"created_at"]` (`resource_serializer.py:14-25`).
 
 **Filters:** `lesson`, `resource_type`, `is_deleted`
+(`resource_viewset.py:27`).
 
-**Request Body (POST -- multipart/form-data):**
+**POST request (multipart/form-data):**
 
-| Field          | Type   | Required | Description                         |
-|----------------|--------|----------|-------------------------------------|
-| lesson         | int    | yes      | Lesson ID                           |
-| file           | file   | yes      | The file to upload                  |
-| resource_type  | string | yes      | One of: pdf, image, video, link     |
-| title          | string | yes      | Display title (max 255)             |
+| field | type | notes |
+|-------|------|-------|
+| `lesson` | int | required; FK to Lesson |
+| `uploaded_by` | int | optional; usually set server-side from auth user |
+| `file` | file | required |
+| `resource_type` | string | one of `PDF`, `VIDEO`, `DOCUMENT`, `IMAGE`, `OTHER` (`resource_model.py:23-28`) |
+| `title` | string | optional, max 255 |
 
-**Response (200/201):**
-
+**Response (example):**
 ```json
 {
-  "id": 1,
-  "lesson": 1,
-  "uploaded_by": 3,
-  "file": "https://s3.amazonaws.com/bucket/resources/...",
-  "resource_type": "pdf",
+  "id": 1, "lesson": 3, "uploaded_by": 2,
+  "file": "https://<bucket>.s3.amazonaws.com/resources/5/lecture.pdf?<pre-signed query>",
+  "resource_type": "PDF",
   "title": "Chapter 1 Slides",
-  "created_at": "2026-04-16T12:00:00Z",
-  "is_deleted": false,
-  "deleted_at": null
+  "created_at": "2026-04-16T12:00:00Z"
 }
 ```
 
-**Status Codes:**
-
-| Code | Meaning                              |
-|------|--------------------------------------|
-| 200  | Success (GET, PUT, PATCH)            |
-| 201  | Created (POST)                       |
-| 204  | Deleted (DELETE)                     |
-| 400  | Validation error or file too large   |
-| 401  | Not authenticated                    |
-| 403  | Not a tutor (write operations)       |
-| 404  | Resource not found                   |
+`file` is rendered as a pre-signed URL (`querystring_expire=3600`,
+`core_lms/settings.py:179`). Stored S3 key follows
+`resources/{course_id}/{filename}`
+(`apps/learning/services/storage_service.py:4-14`).
 
 ---
 
 ## 4. Assignments
 
-### /api/v1/assignments/
+### `/api/v1/assignments/` — `AssignmentViewSet` (`apps/curriculum/viewsets/assignment_viewset.py:11`)
 
-Manage lesson assignments.
-
-| Method | Path                        | Permission      | Description            |
-|--------|-----------------------------|-----------------|------------------------|
-| GET    | /api/v1/assignments/        | IsAuthenticated | List all assignments   |
-| POST   | /api/v1/assignments/        | IsTutor         | Create an assignment   |
-| GET    | /api/v1/assignments/{id}/   | IsAuthenticated | Retrieve an assignment |
-| PUT    | /api/v1/assignments/{id}/   | IsTutor         | Full update            |
-| PATCH  | /api/v1/assignments/{id}/   | IsTutor         | Partial update         |
-| DELETE | /api/v1/assignments/{id}/   | IsTutor         | Soft delete            |
+CRUD via `ModelViewSet`; `IsAuthenticated` for reads, `IsTutor` for
+writes (`assignment_viewset.py:27-35`).
+Serializer: `AssignmentSerializer`
+(`apps/curriculum/serializers/assignment_serializer.py:6`) with fields
+`["id", "lesson", "created_by", "title", "description", "due_date",
+"max_score", "created_at"]`; read-only `["id", "created_at"]`.
 
 **Filters:** `lesson`, `created_by`, `is_deleted`
+(`assignment_viewset.py:25`).
 
-**Request Body (POST/PUT):**
-
+**Request body (POST):**
 ```json
 {
   "lesson": 1,
-  "title": "string (max 255)",
-  "description": "string",
-  "due_date": "2026-05-01T23:59:00Z",
-  "max_score": 100.00
-}
-```
-
-**Response (200/201):**
-
-```json
-{
-  "id": 1,
-  "lesson": 1,
-  "created_by": 3,
   "title": "Lab Exercise 1",
   "description": "...",
   "due_date": "2026-05-01T23:59:00Z",
-  "max_score": 100.00,
-  "created_at": "2026-04-16T12:00:00Z",
-  "is_deleted": false,
-  "deleted_at": null
+  "max_score": "100.00"
 }
 ```
-
-**Status Codes:** Same as resources.
 
 ---
 
 ## 5. Submissions
 
-### /api/v1/submissions/
+### `/api/v1/submissions/` — `SubmissionViewSet` (`apps/curriculum/viewsets/submission_viewset.py:15`)
 
-Manage student assignment submissions with row-level isolation (students see only their own submissions).
+ModelViewSet with dynamic permissions and queryset scoping:
 
-| Method | Path                              | Permission  | Description                    |
-|--------|-----------------------------------|-------------|--------------------------------|
-| GET    | /api/v1/submissions/              | IsAuthenticated | List submissions           |
-| POST   | /api/v1/submissions/              | IsStudent   | Submit an assignment           |
-| GET    | /api/v1/submissions/{id}/         | IsAuthenticated | Retrieve a submission      |
-| PATCH  | /api/v1/submissions/{id}/grade/   | IsTutor     | Grade a submission             |
-| DELETE | /api/v1/submissions/{id}/         | IsTutor     | Soft delete                    |
+- `get_queryset` scopes to `student=request.user` when caller is a
+  student, returns all rows for tutors
+  (`submission_viewset.py:31-47`).
+- `get_permissions`: `create` requires `IsStudent`;
+  `update`/`partial_update`/`destroy`/`grade` require `IsTutor`;
+  `list`/`retrieve` require `IsAuthenticated`
+  (`submission_viewset.py:49-61`).
 
-**Filters:** `assignment`, `is_deleted`
+Serializer: `SubmissionSerializer`
+(`apps/curriculum/serializers/submission_serializer.py:6`) with fields
+`["id", "assignment", "student", "file", "submitted_at", "grade",
+"graded_at"]`; read-only
+`["id", "submitted_at", "grade", "graded_at"]`.
 
-**Request Body (POST -- multipart/form-data):**
+**Filters:** `assignment`, `is_deleted` (`submission_viewset.py`).
 
-| Field       | Type   | Required | Description                   |
-|-------------|--------|----------|-------------------------------|
-| assignment  | int    | yes      | Assignment ID                 |
-| file        | file   | yes      | The submission file            |
+**POST (multipart/form-data):**
 
-**Request Body (PATCH /grade/):**
+| field | type | notes |
+|-------|------|-------|
+| `assignment` | int | required |
+| `student` | int | required (matches authenticated student) |
+| `file` | file | required |
 
+Unique constraint `(assignment, student)` — second POST returns 400 /
+integrity error.
+
+### PATCH `/api/v1/submissions/{id}/grade/` — `SubmissionViewSet.grade`
+
+`@action(detail=True, methods=["patch"], permission_classes=[IsTutor])`
+(`submission_viewset.py:139`).
+
+Request:
 ```json
-{
-  "grade": 85.50
-}
+{ "grade": "85.50" }
 ```
 
-**Response (200/201):**
-
-```json
-{
-  "id": 1,
-  "assignment": 1,
-  "student": 5,
-  "file": "https://s3.amazonaws.com/bucket/submissions/...",
-  "submitted_at": "2026-04-16T14:30:00Z",
-  "grade": null,
-  "graded_at": null,
-  "is_deleted": false,
-  "deleted_at": null
-}
-```
-
-**Status Codes:**
-
-| Code | Meaning                                        |
-|------|------------------------------------------------|
-| 200  | Success (GET, PATCH)                           |
-| 201  | Created (POST)                                 |
-| 204  | Deleted (DELETE)                               |
-| 400  | Validation error, duplicate submission         |
-| 401  | Not authenticated                              |
-| 403  | Permission denied                              |
-| 404  | Submission not found                           |
+Response: the updated submission via `SubmissionSerializer` with
+`grade` and `graded_at` populated. 400 if `grade` is missing or cannot
+be parsed as a Decimal.
 
 ---
 
 ## 6. Quizzes
 
-### /api/v1/quizzes/
+### `/api/v1/quizzes/` — `QuizViewSet` (`apps/assessments/viewsets/quiz_viewset.py:9`)
 
-Read-only access to quizzes with nested questions and answer choices.
+**Read-only** (`ReadOnlyModelViewSet`);
+`permission_classes = [AllowAny]` (`quiz_viewset.py:10-19`).
+`queryset = Quiz.objects.filter(is_active=True)`.
 
-| Method | Path                    | Permission | Description               |
-|--------|-------------------------|------------|---------------------------|
-| GET    | /api/v1/quizzes/        | AllowAny   | List all active quizzes   |
-| GET    | /api/v1/quizzes/{id}/   | AllowAny   | Retrieve quiz with questions and choices |
+- `list` uses `QuizListSerializer` — fields `["id", "title", "course",
+  "time_limit_minutes", "is_active", "question_count"]`, where
+  `question_count` is a `SerializerMethodField`
+  (`apps/assessments/serializers/quiz_serializer.py:29-35`).
+- `retrieve` uses `QuizDetailSerializer` — fields `["id", "title",
+  "description", "course", "time_limit_minutes", "is_active",
+  "questions"]`
+  (`apps/assessments/serializers/quiz_serializer.py:37-43`).
+  `questions[]` embeds `QuestionSerializer` with fields
+  `["id", "text", "concept_id", "order", "choices"]`
+  (`quiz_serializer.py:21-27`); `choices[]` embeds
+  `AnswerChoiceSerializer` with fields **`["id", "text"]` only** — no
+  `is_correct` (`quiz_serializer.py:6-11`).
 
-**Filters:** None (read-only, active quizzes only).
-
-**Response (200):**
-
+Example retrieve response:
 ```json
 {
-  "id": 1,
-  "course": 1,
-  "title": "Midterm Exam",
-  "description": "...",
-  "time_limit_minutes": 30,
-  "is_active": true,
-  "created_at": "2026-04-16T12:00:00Z",
+  "id": 1, "course": 1,
+  "title": "Midterm Exam", "description": "...",
+  "time_limit_minutes": 30, "is_active": true,
   "questions": [
-    {
-      "id": 1,
-      "text": "What is a variable?",
-      "concept_id": "variables_basics",
-      "order": 1,
-      "answer_choices": [
-        {
-          "id": 1,
-          "text": "A named storage location in memory",
-          "is_correct": true
-        },
-        {
-          "id": 2,
-          "text": "A type of loop",
-          "is_correct": false
-        }
-      ]
-    }
+    { "id": 1, "text": "...", "concept_id": "Variables", "order": 1,
+      "choices": [{ "id": 1, "text": "..." }, { "id": 2, "text": "..." }] }
   ]
 }
 ```
-
-Note: The `is_correct` field is intentionally excluded from the `AnswerChoice` serializer. Student-facing quiz detail responses never expose correct answers.
-
-**Status Codes:**
-
-| Code | Meaning              |
-|------|----------------------|
-| 200  | Success              |
-| 404  | Quiz not found       |
 
 ---
 
 ## 7. Attempts
 
-### Attempts
+### `/api/v1/attempts/` — `AttemptViewSet` (`apps/assessments/viewsets/attempt_viewset.py:101`)
 
-| Method | Path | Permission | Description |
-|--------|------|------------|-------------|
-| POST | /api/v1/attempts/ | IsStudent | Submit a completed quiz; returns score and adaptive plan |
-| GET | /api/v1/attempts/ | IsStudent | List the authenticated student's quiz attempts (paginated, row-level scoped) |
-| GET | /api/v1/attempts/{id}/ | IsStudent | Retrieve a single attempt owned by the authenticated student |
+Viewset type: `viewsets.ViewSet` (no automatic CRUD). Permissions:
+`[IsAuthenticated, IsStudent]` (line 115).
 
-**Note:** Multiple attempts per (student, quiz) are allowed. A student may retake a quiz to improve their score and trigger an updated adaptive study plan.
+#### POST `/api/v1/attempts/` — `create`
 
-**Row-level scoping:** Students see only their own attempts. Attempting to retrieve another student's attempt returns 404.
-
-### POST /api/v1/attempts/
-
-Submit a quiz attempt with answers. Triggers automated scoring and adaptive plan generation via AxiomEngine.
-
-| Attribute     | Value                    |
-|---------------|--------------------------|
-| Permission    | IsStudent                |
-| Content-Type  | application/json         |
-
-**Request Body:**
-
+Body validated by `AttemptSubmitSerializer`
+(`apps/assessments/serializers/attempt_serializer.py:11-18`):
 ```json
 {
   "quiz_id": 1,
-  "student_id": 5,
+  "student_id": 2,
   "answers": [
-    {
-      "question_id": 1,
-      "selected_choice_id": 3
-    },
-    {
-      "question_id": 2,
-      "selected_choice_id": 7
-    }
+    { "question_id": 1, "selected_choice_id": 3 },
+    { "question_id": 2, "selected_choice_id": 7 }
   ]
 }
 ```
 
-**Success Response (201):**
+Behaviour (`attempt_viewset.py:139-186`):
+1. 400 if student or quiz not found.
+2. Creates `QuizAttempt` and bulk-inserts `AttemptAnswer` rows.
+3. `ScoringService.score_and_evaluate(attempt)` computes score,
+   creates Evaluation / FailedTopic / EvaluationTelemetry, and stores
+   `adaptive_plan` on the attempt (see 02_use_cases.md § UC-01 for the
+   service call chain).
+4. Response (201) merges `AttemptResultSerializer(attempt).data` with
+   the service result dict:
 
 ```json
 {
-  "attempt_id": 42,
-  "quiz_id": 1,
-  "student_id": 5,
-  "final_score": 75.00,
-  "is_submitted": true,
-  "start_time": "2026-04-16T14:00:00Z",
-  "end_time": "2026-04-16T14:25:00Z",
-  "failed_topics": [
-    {
-      "concept_id": "recursion_basics",
-      "score": 0.00,
-      "max_score": 25.00
-    }
-  ],
-  "adaptive_plan": {
-    "plan": [
-      {
-        "concept_id": "recursion_basics",
-        "recommended_resources": ["..."],
-        "estimated_time_minutes": 45,
-        "difficulty": "intermediate"
-      }
-    ],
-    "fallback": false
-  }
+  "id": 42, "student": 2, "quiz": 1,
+  "start_time": "...", "end_time": "...",
+  "final_score": "3.00", "is_submitted": true,
+  "adaptive_plan": { /* union -- see 04_architecture § 3.1 */ },
+  "score": 3.0, "max_score": 4.0,
+  "failed_concepts": ["Polymorphism"],
+  "evaluation_id": 17
 }
 ```
 
-**Status Codes:**
+Note the heterogeneous `adaptive_plan` envelope (§ 04 CV-02).
 
-| Code | Meaning                                        |
-|------|------------------------------------------------|
-| 201  | Attempt created, scored, and plan generated    |
-| 400  | Validation error (missing answers, invalid IDs)|
-| 401  | Not authenticated                              |
-| 403  | Not a student                                  |
+#### GET `/api/v1/attempts/` — `list`
 
-Note: If the AxiomEngine is unreachable, the response still returns 201 with `"adaptive_plan": {"plan": [], "fallback": true}`.
+Returns paginated `AttemptResultSerializer` results filtered to
+`student=request.user`
+(`apps/assessments/viewsets/attempt_viewset.py:197-215`).
+
+#### GET `/api/v1/attempts/{id}/` — `retrieve`
+
+Row-level scoped: returns 404 if `pk` belongs to another student
+(`apps/assessments/viewsets/attempt_viewset.py:232-250`).
 
 ---
 
 ## 8. Proctoring
 
-### POST /api/v1/proctoring/logs/
+### POST `/api/v1/proctoring/logs/` — `ProctoringViewSet.create` (`apps/assessments/viewsets/proctoring_viewset.py:100`)
 
-Bulk-create proctoring event logs for a quiz attempt. Called by the Angular frontend's proctoring module during an active quiz session.
+Permission: `[IsAuthenticated, IsStudent]`
+(`proctoring_viewset.py:81`).
 
-| Attribute     | Value                    |
-|---------------|--------------------------|
-| Permission    | IsStudent                |
-| Content-Type  | application/json         |
-
-**Request Body:**
-
+Request body validated by `ProctoringBulkSerializer`
+(`apps/assessments/serializers/proctoring_serializer.py:13-18`):
 ```json
 {
   "events": [
-    {
-      "attempt": 42,
-      "event_type": "tab_switch",
-      "timestamp": "2026-04-16T14:10:23Z",
-      "severity_score": 0.80
-    },
-    {
-      "attempt": 42,
-      "event_type": "face_absence",
-      "timestamp": "2026-04-16T14:12:05Z",
-      "severity_score": 0.95
-    }
+    { "attempt": 42, "event_type": "tab_switched",
+      "timestamp": "2026-04-16T14:10:23Z", "severity_score": "0.80" },
+    { "attempt": 42, "event_type": "face_not_detected",
+      "timestamp": "2026-04-16T14:12:05Z", "severity_score": "0.95" }
   ]
 }
 ```
 
-**Success Response (201):**
+`event_type` choices (exactly three; `apps/assessments/models/proctoring_model.py:10-13`):
+- `"tab_switched"`
+- `"face_not_detected"`
+- `"multiple_faces"`
 
+Response 201:
 ```json
-{
-  "created": 2
-}
+{ "ingested": 2 }
 ```
-
-**Status Codes:**
-
-| Code | Meaning                              |
-|------|--------------------------------------|
-| 201  | Logs created                         |
-| 400  | Validation error                     |
-| 401  | Not authenticated                    |
-| 403  | Not a student                        |
-
-**Supported event_type values:** `tab_switch`, `face_absence`, `copy_paste`, `window_resize`, `right_click`, `devtools_open`
 
 ---
 
 ## 9. Analytics
 
-### GET /api/v1/analytics/course/{id}/dashboard/
+### GET `/api/v1/analytics/course/{course_id}/dashboard/` — `TeacherDashboardViewSet.course_dashboard` (`apps/assessments/viewsets/analytics_viewset.py:131-224`)
 
-Retrieve an analytics dashboard for a specific course. Aggregates proctoring data, VARK distribution, and commonly failed concepts.
+Permission: `[IsAuthenticated, IsTutor]`
+(`analytics_viewset.py:96`). Path param `course_id` must be a
+positive integer (`url_path=r"course/(?P<course_id>[^/.]+)/dashboard"`).
 
-| Attribute     | Value                    |
-|---------------|--------------------------|
-| Permission    | IsTutor                  |
-| Content-Type  | application/json         |
-
-**Path Parameters:**
-
-| Parameter | Type | Description       |
-|-----------|------|-------------------|
-| id        | int  | Course ID         |
-
-**Success Response (200):**
-
+Response 200 (`analytics_viewset.py:215-224`):
 ```json
 {
-  "proctoring_alerts": [
-    {
-      "student_id": 5,
-      "student_name": "Jane Doe",
-      "attempt_id": 42,
-      "total_events": 7,
-      "avg_severity": 0.72
-    }
-  ],
-  "vark_distribution": {
-    "visual": 12,
-    "auditory": 8,
-    "reading": 15,
-    "kinesthetic": 5
-  },
+  "course_id": 1,
+  "course_code": "CS-201",
+  "course_name": "Advanced Programming",
+  "total_enrolled_students": 10,
+  "average_quiz_score": 72.50,
+  "proctoring_alerts": { "tab_switched": 6, "multiple_faces": 4 },
+  "vark_distribution": { "visual": 3, "aural": 2, "read_write": 3, "kinesthetic": 2 },
   "top_failed_concepts": [
-    {
-      "concept_id": "recursion_basics",
-      "failure_count": 23,
-      "avg_score_ratio": 0.35
-    },
-    {
-      "concept_id": "pointer_arithmetic",
-      "failure_count": 18,
-      "avg_score_ratio": 0.42
-    }
+    { "concept_id": "Polymorphism", "fail_count": 3 },
+    { "concept_id": "Recursion", "fail_count": 2 }
   ]
 }
 ```
 
-**Status Codes:**
+> `proctoring_alerts` includes only events in `CRITICAL_EVENT_TYPES =
+> [TAB_SWITCHED, MULTIPLE_FACES]` (`analytics_viewset.py:98-101`).
+> `face_not_detected` is **deliberately excluded** from this aggregate.
 
-| Code | Meaning                              |
-|------|--------------------------------------|
-| 200  | Dashboard data returned              |
-| 401  | Not authenticated                    |
-| 403  | Not a tutor                          |
-| 404  | Course not found                     |
+Response 404: course not found — `{"error": "not_found", "detail":
+"Course not found."}`.
 
 ---
 
 ## 10. Certificates
 
-### POST /api/v1/certificates/generate/
+### POST `/api/v1/certificates/generate/` — `CertificateViewSet.generate` (`apps/learning/viewsets/certificate_viewset.py:77-129`)
 
-Generate a completion certificate for a student in a course. Creates a SHA-256 hash for tamper detection. Fails if a certificate already exists for the student-course pair.
+Permission: `[IsAuthenticated, IsStudent]`
+(`certificate_viewset.py:22`).
 
-| Attribute     | Value                    |
-|---------------|--------------------------|
-| Permission    | IsStudent                |
-| Content-Type  | application/json         |
-
-**Request Body:**
-
+Request:
 ```json
-{
-  "student_id": 5,
-  "course_id": 1
-}
+{ "student_id": 2, "course_id": 1 }
 ```
 
-**Success Response (201):**
-
+Response 201:
 ```json
 {
-  "certificate_hash": "a3f2b8c1d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1",
-  "issued_at": "2026-04-16T15:00:00Z",
+  "certificate_hash": "a3f8c2e1...",  // 64-char SHA-256 hex digest
+  "issued_at":        "2026-04-16T15:00:00Z",
   "course_id": 1,
-  "student_id": 5
+  "student_id": 2
 }
 ```
 
-**Status Codes:**
-
-| Code | Meaning                                          |
-|------|--------------------------------------------------|
-| 201  | Certificate generated                            |
-| 400  | Certificate already exists for this student-course pair |
-| 401  | Not authenticated                                |
-| 403  | Not a student                                    |
+Status codes:
+| Code | Meaning | Source |
+|------|---------|--------|
+| 201  | certificate issued (or existing one returned idempotently) | `certification_service.py:94-123` |
+| 400  | missing student_id/course_id, or student/course not found | `certificate_viewset.py:90-110` |
+| 403  | no passing Evaluation (`score >= 60.00`) and no passing QuizAttempt (`final_score >= 60.00`) — `{"error": "ineligible", "detail": "..."}` | `certificate_viewset.py:115-119`; `certification_service.py:52-73` |
 
 ---
 
 ## 11. Users
 
-### POST /api/v1/users/{id}/onboard/
+### POST `/api/v1/users/{id}/onboard/` — `UserViewSet.onboard` (`apps/learning/viewsets/user_onboarding_viewset.py:117`)
 
-Complete the VARK learning style onboarding for a user. Sets the `vark_dominant` field based on the student's questionnaire responses.
+Permission: `[IsAuthenticated]` (line 95). Returns 403 if the caller is
+not the same user as `id` (line 130-134).
 
-| Attribute     | Value                    |
-|---------------|--------------------------|
-| Permission    | IsAuthenticated          |
-| Content-Type  | application/json         |
-
-**Path Parameters:**
-
-| Parameter | Type | Description    |
-|-----------|------|----------------|
-| id        | int  | User ID        |
-
-**Request Body:**
-
+Request body (`VARKOnboardingSerializer`, lines 13-21):
 ```json
 {
+  "answers": [
+    { "category": "visual", "value": 7 },
+    { "category": "aural", "value": 3 },
+    { "category": "read_write", "value": 5 },
+    { "category": "kinesthetic", "value": 4 }
+  ]
+}
+```
+
+- `category` must be one of `"visual"`, `"aural"`, `"read_write"`,
+  `"kinesthetic"`.
+- `value` must be an integer 0-10.
+
+Response 200 (`user_onboarding_viewset.py:153-160`):
+```json
+{
+  "student_id": 2,
+  "vark_scores": { "visual": 7, "aural": 3, "read_write": 5, "kinesthetic": 4 },
   "vark_dominant": "visual"
 }
 ```
 
-Valid values for `vark_dominant`: `visual`, `auditory`, `reading`, `kinesthetic`
-
-**Success Response (200):**
-
-```json
-{
-  "id": 5,
-  "username": "jane.doe",
-  "role": "student",
-  "vark_dominant": "visual"
-}
-```
-
-**Status Codes:**
-
-| Code | Meaning                              |
-|------|--------------------------------------|
-| 200  | Profile updated                      |
-| 400  | Invalid VARK value                   |
-| 401  | Not authenticated                    |
-| 404  | User not found                       |
+The dominant modality is persisted to `user.vark_dominant`
+(line 150-151). Values are exactly as listed; in particular the service
+uses `"aural"` (not `"auditory"`), which differs from the Go
+`vark_profile` documentation — see `04_architecture.md` § 5 CV-01.
 
 ---
 
 ## 12. Evaluations
 
-### /api/v1/evaluations/
+### `/api/v1/evaluations/` — `EvaluationViewSet` (`apps/learning/viewsets/evaluation_viewset.py:15`)
 
-Manage student evaluations (scores per course).
+ModelViewSet; all actions require `IsAuthenticated` only
+(`evaluation_viewset.py:26`). Serializer: `EvaluationSerializer`
+(`apps/learning/serializers/evaluation_serializer.py:8`).
 
-| Method | Path                        | Permission      | Description             |
-|--------|-----------------------------|-----------------|-------------------------|
-| GET    | /api/v1/evaluations/        | IsAuthenticated | List evaluations        |
-| POST   | /api/v1/evaluations/        | IsAuthenticated | Create an evaluation    |
-| GET    | /api/v1/evaluations/{id}/   | IsAuthenticated | Retrieve an evaluation  |
-| PUT    | /api/v1/evaluations/{id}/   | IsAuthenticated | Full update             |
-| PATCH  | /api/v1/evaluations/{id}/   | IsAuthenticated | Partial update          |
-| DELETE | /api/v1/evaluations/{id}/   | IsAuthenticated | Delete                  |
+Serializer fields (lines 18-29):
+`["id", "student", "course", "score", "max_score", "created_at",
+"failed_topics", "telemetry"]`; read-only `["id", "created_at"]`.
 
-**Filters:** None specified.
+`failed_topics` — list of `FailedTopicSerializer`
+(`failed_topic_serializer.py:6-10`) with
+`["id", "concept_id", "score", "max_score"]`.
+`telemetry` — nested `TelemetrySerializer`
+(`telemetry_serializer.py:6-9`) with
+`["time_on_task_seconds", "clicks"]`, `required=False`.
 
-**Request Body (POST/PUT):**
+#### POST `/api/v1/evaluations/` — `create` (`evaluation_viewset.py:42-80`)
 
+Request:
 ```json
 {
-  "student": 5,
-  "course": 1,
-  "score": 85.50,
-  "max_score": 100.00
+  "student": 2, "course": 1,
+  "score": "85.50", "max_score": "100.00",
+  "failed_topics": [
+    { "concept_id": "Recursion", "score": "2.00", "max_score": "5.00" }
+  ],
+  "telemetry": { "time_on_task_seconds": 1800, "clicks": 120 }
 }
 ```
 
-**Response (200/201):**
+Response 201 — the serialized evaluation with two added keys:
 
-```json
-{
-  "id": 1,
-  "student": 5,
-  "course": 1,
-  "score": 85.50,
-  "max_score": 100.00,
-  "created_at": "2026-04-16T12:00:00Z"
-}
-```
+- `adaptive_plan` — `PlanResponse` from Go, or `null` if no
+  `failed_topics`. Present whenever the pipeline runs.
+- `axiom_error` — present only when Go returned an error (timeout or
+  non-2xx); structure:
+  ```json
+  { "error": "axiom_timeout|axiom_error", "status_code": 500, "details": "..." }
+  ```
+  (`evaluation_viewset.py:64-78`). **Unlike the scoring path, this
+  endpoint does not substitute a `{"plan":[],"fallback":true}`
+  envelope on error.**
 
-**Status Codes:**
-
-| Code | Meaning                              |
-|------|--------------------------------------|
-| 200  | Success (GET, PUT, PATCH)            |
-| 201  | Created (POST)                       |
-| 204  | Deleted (DELETE)                     |
-| 400  | Validation error                     |
-| 401  | Not authenticated                    |
-| 404  | Evaluation not found                 |
+Other CRUD methods (`list`, `retrieve`, `update`, `partial_update`,
+`destroy`) are standard DRF implementations over the same serializer.
 
 ---
 
 ## 13. Evaluation Telemetry
 
-### EvaluationTelemetry
+### `/api/v1/evaluation-telemetry/` — `EvaluationTelemetryViewSet` (`apps/assessments/viewsets/evaluation_telemetry_viewset.py:16`)
 
-| Method | Path | Permission | Description |
-|--------|------|------------|-------------|
-| POST | /api/v1/evaluation-telemetry/ | IsStudent | Create a telemetry record linked to an evaluation |
-| GET | /api/v1/evaluation-telemetry/ | IsAuthenticated | List telemetry records (row-scoped for students) |
-| GET | /api/v1/evaluation-telemetry/{id}/ | IsAuthenticated | Retrieve a single telemetry record (row-scoped for students) |
+ModelViewSet over `EvaluationTelemetry`. Serializer:
+`EvaluationTelemetrySerializer`
+(`apps/assessments/serializers/telemetry_serializer.py:8`) with fields
+`["id", "evaluation", "time_on_task_seconds", "clicks"]`; read-only
+`["id"]`.
 
-**Request Body (POST):**
-- `evaluation` (integer, required): Primary key of the Evaluation
-- `time_on_task_seconds` (integer, required): Total time on task in seconds
-- `clicks` (integer, required): Total click count during the session
+Dynamic permissions (`evaluation_telemetry_viewset.py:45-55`):
+- `create` → `[IsStudent]`
+- `list`, `retrieve` → `[IsAuthenticated]`
+- others (`update`, `partial_update`, `destroy`) → `[IsTutor]`
 
-**Response fields:** id, evaluation, time_on_task_seconds, clicks
+Row-level queryset scoping
+(`evaluation_telemetry_viewset.py:29-43`): students see only their own
+telemetry (via `evaluation.student=self.request.user`); tutors see all.
 
 ---
 
 ## 14. System
 
-### GET /health/
+### GET `/health/` — `health_check` (`apps/learning/viewsets/health_viewset.py:14-18`)
 
-Health check endpoint. Returns a simple status response. No authentication required. This endpoint is outside the `/api/v1/` prefix.
-
-| Attribute     | Value                    |
-|---------------|--------------------------|
-| Permission    | AllowAny                 |
-
-**Success Response (200):**
-
+`@api_view(["GET"])`, `@permission_classes([AllowAny])`. Registered at
+`core_lms/urls.py:31`. Returns:
 ```json
-{
-  "status": "ok"
-}
+{ "status": "ok" }
 ```
 
-**Status Codes:**
+### `/swagger/` and `/redoc/`
 
-| Code | Meaning              |
-|------|----------------------|
-| 200  | Service is healthy   |
+API documentation UIs backed by `drf_yasg`
+(`core_lms/urls.py:51-60`). `AllowAny`.
 
----
-
-## Appendix A: Permission Classes
-
-| Class           | Rule                                                           |
-|-----------------|----------------------------------------------------------------|
-| AllowAny        | No authentication required.                                    |
-| IsAuthenticated | Valid JWT access token required in the Authorization header.   |
-| IsStudent       | Authenticated user with `role = "student"`.                    |
-| IsTutor         | Authenticated user with `role = "tutor"`.                      |
+### `/admin/` — Django admin (`core_lms/urls.py:28`).
 
 ---
 
-## Appendix B: Common Query Parameters
+## Appendix A: Permission classes
 
-| Parameter   | Type   | Description                                              |
-|-------------|--------|----------------------------------------------------------|
-| page        | int    | Page number for pagination (default: 1).                 |
-| is_deleted  | bool   | Include soft-deleted records when set to `true`.         |
-| ordering    | string | Field name to sort by. Prefix with `-` for descending.  |
+| Class | Source | Check |
+|-------|--------|-------|
+| `AllowAny` | DRF | always true |
+| `IsAuthenticated` | DRF | request.user.is_authenticated |
+| `IsStudent` | `apps/learning/permissions.py:4-18` | authenticated AND `request.user.role == "STUDENT"` |
+| `IsTutor` | `apps/learning/permissions.py:21-35` | authenticated AND `request.user.role == "TUTOR"` |
 
----
-
-## Appendix C: HTTP Status Code Summary
-
-| Code | Meaning                                                     |
-|------|-------------------------------------------------------------|
-| 200  | Request succeeded.                                          |
-| 201  | Resource created successfully.                              |
-| 204  | Resource deleted successfully (no content returned).        |
-| 400  | Bad request -- validation error or malformed input.         |
-| 401  | Authentication credentials missing or invalid.              |
-| 403  | Authenticated but insufficient permissions.                 |
-| 404  | Requested resource does not exist.                          |
-| 429  | Rate limit exceeded (AxiomEngine: 50 req/min/IP).          |
-| 500  | Internal server error.                                      |
+> Role values are uppercase (`"STUDENT"`, `"TUTOR"`) as defined by
+> `LMSUser.Role` (`apps/learning/models/user_model.py:13-15`).
 
 ---
 
-## Appendix D: Frontend Integration Guide
+## Appendix B: Common query parameters
 
-This appendix is written for the Angular frontend team integrating with the AxiomLMS backend.
+| Parameter | Where applicable | Description |
+|-----------|------------------|-------------|
+| `page` | all list endpoints | page number for `PageNumberPagination` |
+| `is_deleted` | career, semester, course, module, lesson, resource, assignment, submission | filter soft-deleted rows; default manager already excludes `is_deleted=True` |
+| `career` | semester | filter semesters by career id |
+| `semester`, `semester__career` | course | filter by semester / parent career |
+| `course` | module, quiz | filter by course id |
+| `module` | lesson | filter by module id |
+| `lesson`, `resource_type` | resource | filter resources |
+| `lesson`, `created_by` | assignment | filter assignments |
+| `assignment` | submission | filter submissions |
 
-### Base URL and Versioning
+---
 
-All application endpoints are prefixed with `/api/v1/`. Authentication endpoints are at `/api/v1/auth/token/` and `/api/v1/auth/token/refresh/`. The health check is at `/health/` (no versioning). No backwards-incompatible changes will be made within `v1`.
+## Appendix C: HTTP status codes in use
 
-### Authentication Flow
+| Code | Meaning | Notable sources |
+|------|---------|-----------------|
+| 200 | GET/PUT/PATCH success | all list/retrieve |
+| 201 | resource created | all POST |
+| 204 | deleted | soft-delete DELETE |
+| 400 | validation error; custom 400 in attempts/certificate/analytics on missing FK | various |
+| 401 | missing/invalid JWT | DRF `IsAuthenticated` |
+| 403 | wrong role or ineligible student | `IsStudent`, `IsTutor`, certificate ineligibility |
+| 404 | not found (incl. row-level scoping miss) | retrieve actions |
+| 429 | rate limit | `RateLimitedTokenView`; AxiomEngine (Go side) |
+| 500 | unhandled exception | replaced with JSON envelope via `core_lms.exception_handler` |
 
-1. On login, `POST /api/v1/auth/token/` with `{"username": "...", "password": "..."}` to obtain `access` and `refresh` tokens.
-2. Store both tokens **in memory** (for example, a protected service in Angular). Do not persist them in `localStorage` because of XSS risk.
-3. Attach the access token as `Authorization: Bearer <access_token>` on every API request.
-4. On a `401` response, `POST /api/v1/auth/token/refresh/` with `{"refresh": "..."}`.
-5. Replace the stored access and refresh tokens with the new pair from the response. The previous refresh token is now blacklisted.
-6. Retry the original request with the new access token.
-7. If `/token/refresh/` returns `401`, the session is expired. Redirect the user to the login screen.
+---
 
-### CORS
+## Appendix D: Frontend integration notes
 
-The server enforces CORS via `CORS_ALLOWED_ORIGINS`. The frontend origin (e.g. `https://app.example.com`, `http://localhost:4200`) **must** be included in that list on the server. If the origin is missing, browsers will block the request. Coordinate with the backend team to update the origin list on deploy.
+### Auth flow
+1. `POST /api/v1/auth/token/` → store `access` and `refresh` in memory.
+2. Add `Authorization: Bearer <access>` to every request.
+3. On 401, `POST /api/v1/auth/token/refresh/` with `{refresh}`; the
+   response **replaces** both tokens (old refresh is blacklisted).
+4. On 401 from the refresh endpoint, redirect to login.
 
-### Pagination
+### File URLs
+The `file` field rendered in responses is a pre-signed S3 URL valid for
+3600 s (`querystring_expire=3600`). Refresh by re-GETting the parent
+resource.
 
-Every list endpoint returns a paginated envelope:
-```
-{
-  "count": 123,
-  "next": "https://.../api/v1/careers/?page=2",
-  "previous": null,
-  "results": [...]
-}
-```
+### Heterogeneous `adaptive_plan`
+When consuming `/api/v1/attempts/`, branch on the presence of
+`fallback`:
+- **Success** — `adaptive_plan.student_id`, `adaptive_plan.course_id`,
+  `adaptive_plan.items[]`, `adaptive_plan._meta` (see § 04 for field
+  list).
+- **Fallback** — `adaptive_plan.plan === []` and
+  `adaptive_plan.fallback === true`. Display a neutral message.
 
-Use the `next` URL for page 2 and onward. Default page size is 20.
-
-### Soft-deleted Records
-
-Soft-deleted records are excluded from all list and detail responses by default. Pass `?is_deleted=false` explicitly only when a filter is required (for example, to hide records that were restored). Do not rely on `?is_deleted=true` returning anything in production.
-
-### File Uploads
-
-File uploads use `multipart/form-data`. The `file` field in responses is a pre-signed S3 URL valid for **1 hour**. Do not cache file URLs beyond 55 minutes -- refresh by GETting the parent resource to get a new signed URL.
-
-### Error Response Format
-
-- Global / view-level errors: `{"detail": "Human readable message."}` with an appropriate HTTP status code.
-- Validation errors: `{"field_name": ["error message"], ...}` with HTTP 400.
-- Rate-limited token endpoint: `{"detail": "Too many login attempts. Try again later."}` with HTTP 429.
-
-### Rate Limiting
-
-The `/api/v1/auth/token/` endpoint is limited to **10 POST requests per minute per IP**. Implement exponential backoff on 429 responses (e.g. 1s, 2s, 4s, 8s). Do not retry blindly.
+### Direct call to AxiomEngine
+The cognitive-shadow-graph endpoint
+`GET /api/v1/tutor/student/:student_id/cognitive-graph?topics=...`
+lives on **the Go service**, not Django. Route it to
+`AXIOM_ENGINE_URL` directly. See `04_architecture.md` § 3.2.
