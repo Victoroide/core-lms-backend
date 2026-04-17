@@ -1,4 +1,5 @@
 import os
+import sys
 from datetime import timedelta
 from pathlib import Path
 
@@ -21,8 +22,12 @@ INSTALLED_APPS = [
     "corsheaders",
     "rest_framework",
     "drf_yasg",
-    "learning",
-    "assessments",
+    "storages",
+    "django_filters",
+    "rest_framework_simplejwt.token_blacklist",
+    "apps.learning.apps.LearningConfig",
+    "apps.assessments.apps.AssessmentsConfig",
+    "apps.curriculum.apps.CurriculumConfig",
 ]
 
 MIDDLEWARE = [
@@ -37,9 +42,15 @@ MIDDLEWARE = [
 ]
 
 # ---------------------------------------------------------------------------
-# CORS -- permissive for local Angular MVP development
+# CORS -- env-driven allow list
 # ---------------------------------------------------------------------------
-CORS_ALLOW_ALL_ORIGINS = True
+CORS_ALLOWED_ORIGINS = [
+    origin.strip()
+    for origin in os.getenv(
+        "CORS_ALLOWED_ORIGINS", "http://localhost:4200"
+    ).split(",")
+    if origin.strip()
+]
 
 ROOT_URLCONF = "core_lms.urls"
 
@@ -61,16 +72,34 @@ TEMPLATES = [
 
 WSGI_APPLICATION = "core_lms.wsgi.application"
 
-DATABASES = {
-    "default": {
-        "ENGINE": "django.db.backends.postgresql",
-        "NAME": os.getenv("POSTGRES_DB", "core_lms"),
-        "USER": os.getenv("POSTGRES_USER", "lms_admin"),
-        "PASSWORD": os.getenv("POSTGRES_PASSWORD", "lms_secret_2026"),
-        "HOST": os.getenv("POSTGRES_HOST", "localhost"),
-        "PORT": os.getenv("POSTGRES_PORT", "5432"),
+# ---------------------------------------------------------------------------
+# Database -- NeonDB for production, Docker PostgreSQL for test suite
+# ---------------------------------------------------------------------------
+ENVIRONMENT = os.getenv("DJANGO_ENV", "development")
+
+if ENVIRONMENT == "test":
+    DATABASES = {
+        "default": {
+            "ENGINE": "django.db.backends.postgresql",
+            "NAME": os.getenv("POSTGRES_DB"),
+            "USER": os.getenv("POSTGRES_USER"),
+            "PASSWORD": os.getenv("POSTGRES_PASSWORD"),
+            "HOST": os.getenv("POSTGRES_HOST", "db"),
+            "PORT": os.getenv("POSTGRES_PORT", "5432"),
+        }
     }
-}
+else:
+    DATABASES = {
+        "default": {
+            "ENGINE": "django.db.backends.postgresql",
+            "NAME": os.getenv("NEON_DB_NAME"),
+            "USER": os.getenv("NEON_DB_USER"),
+            "PASSWORD": os.getenv("NEON_DB_PASSWORD"),
+            "HOST": os.getenv("NEON_DB_HOST"),
+            "PORT": os.getenv("NEON_DB_PORT", "5432"),
+            "OPTIONS": {"sslmode": "require"},
+        }
+    }
 
 AUTH_USER_MODEL = "learning.LMSUser"
 
@@ -101,15 +130,20 @@ REST_FRAMEWORK = {
     "DEFAULT_PERMISSION_CLASSES": [
         "rest_framework.permissions.IsAuthenticated",
     ],
+    "DEFAULT_FILTER_BACKENDS": [
+        "django_filters.rest_framework.DjangoFilterBackend",
+    ],
+    "EXCEPTION_HANDLER": "core_lms.exception_handler.custom_exception_handler",
 }
 
 # ---------------------------------------------------------------------------
 # SimpleJWT
 # ---------------------------------------------------------------------------
 SIMPLE_JWT = {
-    "ACCESS_TOKEN_LIFETIME": timedelta(hours=2),
+    "ACCESS_TOKEN_LIFETIME": timedelta(minutes=30),
     "REFRESH_TOKEN_LIFETIME": timedelta(days=7),
     "ROTATE_REFRESH_TOKENS": True,
+    "BLACKLIST_AFTER_ROTATION": True,
     "AUTH_HEADER_TYPES": ("Bearer",),
 }
 
@@ -122,10 +156,88 @@ SWAGGER_SETTINGS = {
             "type": "apiKey",
             "name": "Authorization",
             "in": "header",
-            "description": "JWT authorization. Format: Bearer <access_token>",
+            "description": "JWT token. Format: Bearer <access_token>",
         },
     },
     "USE_SESSION_AUTH": False,
+    "JSON_EDITOR": True,
 }
 
 AXIOM_ENGINE_URL = os.getenv("AXIOM_ENGINE_URL", "http://localhost:8080")
+
+# ---------------------------------------------------------------------------
+# AWS S3 / django-storages
+# ---------------------------------------------------------------------------
+AWS_ACCESS_KEY_ID = os.getenv("AWS_ACCESS_KEY_ID", "")
+AWS_SECRET_ACCESS_KEY = os.getenv("AWS_SECRET_ACCESS_KEY", "")
+AWS_STORAGE_BUCKET_NAME = os.getenv("AWS_STORAGE_BUCKET_NAME", "core-lms-files")
+AWS_S3_REGION_NAME = os.getenv("AWS_S3_REGION_NAME", "us-east-1")
+AWS_S3_FILE_OVERWRITE = False
+AWS_DEFAULT_ACL = "private"
+AWS_QUERYSTRING_AUTH = True
+AWS_QUERYSTRING_EXPIRE = 3600
+
+DEFAULT_FILE_STORAGE = "storages.backends.s3boto3.S3Boto3Storage"
+
+if not all([
+    os.getenv("AWS_ACCESS_KEY_ID"),
+    os.getenv("AWS_SECRET_ACCESS_KEY"),
+    os.getenv("AWS_STORAGE_BUCKET_NAME"),
+]):
+    if "test" not in sys.argv and "makemigrations" not in sys.argv:
+        from django.core.exceptions import ImproperlyConfigured
+
+        raise ImproperlyConfigured(
+            "AWS S3 credentials are required. Set AWS_ACCESS_KEY_ID, "
+            "AWS_SECRET_ACCESS_KEY, and AWS_STORAGE_BUCKET_NAME in .env"
+        )
+
+# ---------------------------------------------------------------------------
+# Security
+# ---------------------------------------------------------------------------
+SECURE_SSL_REDIRECT = os.getenv("SECURE_SSL_REDIRECT", "False") == "True"
+SESSION_COOKIE_SECURE = os.getenv("DJANGO_ENV") != "test"
+CSRF_COOKIE_SECURE = os.getenv("DJANGO_ENV") != "test"
+X_FRAME_OPTIONS = "DENY"
+SECURE_CONTENT_TYPE_NOSNIFF = True
+
+# ---------------------------------------------------------------------------
+# Logging
+# ---------------------------------------------------------------------------
+LOGGING = {
+    "version": 1,
+    "disable_existing_loggers": False,
+    "formatters": {
+        "verbose": {
+            "format": "{levelname} {asctime} {module} {message}",
+            "style": "{",
+        }
+    },
+    "handlers": {
+        "console": {
+            "class": "logging.StreamHandler",
+            "formatter": "verbose",
+        }
+    },
+    "root": {
+        "handlers": ["console"],
+        "level": os.getenv("LOG_LEVEL", "INFO"),
+    },
+    "loggers": {
+        "django": {
+            "handlers": ["console"],
+            "level": "WARNING",
+            "propagate": False,
+        },
+        "apps": {
+            "handlers": ["console"],
+            "level": os.getenv("LOG_LEVEL", "INFO"),
+            "propagate": False,
+        },
+    },
+}
+
+# ---------------------------------------------------------------------------
+# Test Runner
+# ---------------------------------------------------------------------------
+TEST_RUNNER = "django.test.runner.DiscoverRunner"
