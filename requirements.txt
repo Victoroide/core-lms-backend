@@ -7,3 +7,7 @@ requests==2.32.3
 python-dotenv==1.1.0
 drf-yasg==1.21.9
 gunicorn==23.0.0
+boto3==1.35.99
+django-storages==1.14.4
+django-filter==24.3
+django-ratelimit==4.1.0
