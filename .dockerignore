@@ -4,3 +4,5 @@ __pycache__/
 .git/
 .env
 db_data/
+resources/
+submissions/

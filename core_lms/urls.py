@@ -3,45 +3,49 @@ from django.urls import include, path
 from drf_yasg import openapi
 from drf_yasg.views import get_schema_view
 from rest_framework import permissions
-from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
+
+from apps.learning.viewsets.auth_viewset import (
+    RateLimitedTokenView,
+    TaggedTokenRefreshView,
+)
+from apps.learning.viewsets.health_viewset import health_check
 
 schema_view = get_schema_view(
     openapi.Info(
-        title="Core LMS API",
+        title="AxiomLMS Core API",
         default_version="v1",
         description=(
-            "University EdTech MVP -- Core Learning Management System.\n\n"
-            "## Authentication\n"
-            "All endpoints require a valid JWT unless otherwise noted.\n\n"
-            "1. POST `/api/v1/auth/token/` with `username` and `password` to obtain an access token.\n"
-            "2. Click **Authorize** above and enter: `Bearer <access_token>`.\n"
-            "3. Click **Authorize** to persist the token for all subsequent requests.\n"
+            "Core LMS API -- academic ontology, evaluation, proctoring, "
+            "adaptive study plans."
         ),
-        contact=openapi.Contact(email="lms-dev@university.edu"),
-        license=openapi.License(name="MIT"),
     ),
     public=True,
     permission_classes=[permissions.AllowAny],
+    authentication_classes=[],
 )
 
 urlpatterns = [
     path("admin/", admin.site.urls),
 
+    # --- Health check (public, no auth) ------------------------------------
+    path("health/", health_check),
+
     # --- JWT Authentication ------------------------------------------------
     path(
         "api/v1/auth/token/",
-        TokenObtainPairView.as_view(),
+        RateLimitedTokenView.as_view(),
         name="token_obtain_pair",
     ),
     path(
         "api/v1/auth/token/refresh/",
-        TokenRefreshView.as_view(),
+        TaggedTokenRefreshView.as_view(),
         name="token_refresh",
     ),
 
     # --- Application routes ------------------------------------------------
-    path("api/v1/", include("learning.urls")),
-    path("api/v1/", include("assessments.urls")),
+    path("api/v1/", include("apps.learning.urls")),
+    path("api/v1/", include("apps.assessments.urls")),
+    path("api/v1/", include("apps.curriculum.urls")),
 
     # --- Documentation -----------------------------------------------------
     path(
