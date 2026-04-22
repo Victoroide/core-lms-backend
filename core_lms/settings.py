@@ -49,6 +49,7 @@ CORS_ALLOWED_ORIGINS = [
     ).split(",")
     if origin.strip()
 ]
+CORS_ALLOW_CREDENTIALS = True
 
 ROOT_URLCONF = "core_lms.urls"
 
@@ -213,6 +214,12 @@ SESSION_COOKIE_SECURE = os.getenv("DJANGO_ENV") != "test"
 CSRF_COOKIE_SECURE = os.getenv("DJANGO_ENV") != "test"
 X_FRAME_OPTIONS = "DENY"
 SECURE_CONTENT_TYPE_NOSNIFF = True
+
+# Railway (and most PaaS) terminates TLS at the edge proxy and forwards
+# plain HTTP to the application container.  These two settings ensure
+# Django reconstructs the correct scheme and host from the proxy headers.
+USE_X_FORWARDED_HOST = True
+SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
 
 # ---------------------------------------------------------------------------
 # Logging
