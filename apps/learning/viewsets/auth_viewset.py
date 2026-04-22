@@ -2,10 +2,13 @@
 
 from django.utils.decorators import method_decorator
 from django_ratelimit.decorators import ratelimit
+from drf_yasg import openapi
 from drf_yasg.utils import swagger_auto_schema
 from rest_framework import status
 from rest_framework.response import Response
 from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
+
+from apps.learning.serializers.token_serializer import AxiomTokenObtainPairSerializer
 
 
 class RateLimitedTokenView(TokenObtainPairView):
@@ -15,6 +18,8 @@ class RateLimitedTokenView(TokenObtainPairView):
     to mitigate credential-stuffing and brute-force attacks. Exceeding
     the limit returns HTTP 429 Too Many Requests.
     """
+
+    serializer_class = AxiomTokenObtainPairSerializer
 
     # ``block=False`` lets us inspect ``request.limited`` and return 429
     # directly instead of the framework's default 403 PermissionDenied.
@@ -27,7 +32,26 @@ class RateLimitedTokenView(TokenObtainPairView):
             "to 10 requests per minute per IP."
         ),
         responses={
-            200: "Access and refresh tokens returned successfully.",
+            200: openapi.Schema(
+                type=openapi.TYPE_OBJECT,
+                properties={
+                    "access": openapi.Schema(type=openapi.TYPE_STRING),
+                    "refresh": openapi.Schema(type=openapi.TYPE_STRING),
+                    "user": openapi.Schema(
+                        type=openapi.TYPE_OBJECT,
+                        properties={
+                            "id": openapi.Schema(type=openapi.TYPE_INTEGER),
+                            "username": openapi.Schema(type=openapi.TYPE_STRING),
+                            "email": openapi.Schema(type=openapi.TYPE_STRING),
+                            "role": openapi.Schema(type=openapi.TYPE_STRING),
+                            "vark_dominant": openapi.Schema(
+                                type=openapi.TYPE_STRING, nullable=True
+                            ),
+                            "full_name": openapi.Schema(type=openapi.TYPE_STRING),
+                        },
+                    ),
+                },
+            ),
             401: "Invalid credentials.",
             429: "Too many login attempts. Rate limit exceeded.",
         },
