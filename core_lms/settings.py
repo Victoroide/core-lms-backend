@@ -165,7 +165,10 @@ AWS_ACCESS_KEY_ID = os.getenv("AWS_ACCESS_KEY_ID", "")
 AWS_SECRET_ACCESS_KEY = os.getenv("AWS_SECRET_ACCESS_KEY", "")
 AWS_STORAGE_BUCKET_NAME = os.getenv("AWS_STORAGE_BUCKET_NAME", "core-lms-files")
 AWS_S3_REGION_NAME = os.getenv("AWS_S3_REGION_NAME", "us-east-1")
-AWS_S3_CUSTOM_DOMAIN = f"{AWS_STORAGE_BUCKET_NAME}.s3.amazonaws.com"
+AWS_S3_CUSTOM_DOMAIN = f"{AWS_STORAGE_BUCKET_NAME}.s3.{AWS_S3_REGION_NAME}.amazonaws.com"
+AWS_S3_ADDRESSING_STYLE = "virtual"
+AWS_QUERYSTRING_AUTH = False
+AWS_DEFAULT_ACL = "public-read"
 
 STATIC_URL = f"https://{AWS_S3_CUSTOM_DOMAIN}/static/"
 STATIC_ROOT = BASE_DIR / "staticfiles"
@@ -176,9 +179,8 @@ STORAGES = {
         "OPTIONS": {
             "bucket_name": AWS_STORAGE_BUCKET_NAME,
             "region_name": AWS_S3_REGION_NAME,
-            "default_acl": "private",
-            "querystring_auth": True,
-            "querystring_expire": 3600,
+            "default_acl": "public-read",
+            "querystring_auth": False,
             "file_overwrite": False,
         },
     },
@@ -188,6 +190,7 @@ STORAGES = {
             "bucket_name": AWS_STORAGE_BUCKET_NAME,
             "region_name": AWS_S3_REGION_NAME,
             "location": "static",
+            "default_acl": "public-read",
             "querystring_auth": False,
             "file_overwrite": True,
         },
