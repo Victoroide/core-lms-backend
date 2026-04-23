@@ -163,8 +163,11 @@ AXIOM_ENGINE_URL = os.getenv("AXIOM_ENGINE_URL", "http://localhost:8080")
 # ---------------------------------------------------------------------------
 AWS_ACCESS_KEY_ID = os.getenv("AWS_ACCESS_KEY_ID", "")
 AWS_SECRET_ACCESS_KEY = os.getenv("AWS_SECRET_ACCESS_KEY", "")
-AWS_STORAGE_BUCKET_NAME = os.getenv("AWS_STORAGE_BUCKET_NAME", "core-lms-files")
+AWS_STORAGE_BUCKET_NAME = os.getenv("AWS_STORAGE_BUCKET_NAME", "core-lms-bucket")
 AWS_S3_REGION_NAME = os.getenv("AWS_S3_REGION_NAME", "us-east-1")
+AWS_S3_ADDRESSING_STYLE = "virtual"
+AWS_QUERYSTRING_AUTH = False
+AWS_DEFAULT_ACL = None
 AWS_S3_CUSTOM_DOMAIN = f"{AWS_STORAGE_BUCKET_NAME}.s3.{AWS_S3_REGION_NAME}.amazonaws.com"
 
 STATIC_URL = f"https://{AWS_S3_CUSTOM_DOMAIN}/static/"
@@ -176,7 +179,9 @@ STORAGES = {
         "OPTIONS": {
             "bucket_name": AWS_STORAGE_BUCKET_NAME,
             "region_name": AWS_S3_REGION_NAME,
-            "default_acl": "public-read",
+            "custom_domain": AWS_S3_CUSTOM_DOMAIN,
+            "addressing_style": "virtual",
+            "default_acl": None,
             "querystring_auth": False,
             "file_overwrite": False,
         },
@@ -186,8 +191,10 @@ STORAGES = {
         "OPTIONS": {
             "bucket_name": AWS_STORAGE_BUCKET_NAME,
             "region_name": AWS_S3_REGION_NAME,
+            "custom_domain": AWS_S3_CUSTOM_DOMAIN,
+            "addressing_style": "virtual",
             "location": "static",
-            "default_acl": "public-read",
+            "default_acl": None,
             "querystring_auth": False,
             "file_overwrite": True,
         },

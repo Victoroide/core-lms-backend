@@ -25,9 +25,9 @@
           |                           v        v            v
           |                 +---------+--+  +--+---------+  +-------------------------+
           |                 |            |  |            |  |                         |
-          +---------------->+  AxiomEngine  |            |  |  AWS S3 (private ACL)   |
-                            |  Go / Fiber   |            |  |  pre-signed URLs        |
-                            |  port 8080    |            |  |  expiry 3600s           |
+          +---------------->+  AxiomEngine  |            |  |  AWS S3 (bucket policy) |
+                            |  Go / Fiber   |            |  |  public-read via policy |
+                            |  port 8080    |            |  |  no per-object ACL     |
                             +------+--------+            |  +-------------------------+
                                    |                     |
                                    | BAML                |
@@ -164,18 +164,18 @@ Configured at `reasoning.go:62-78`:
 
 ### 2.3 AWS S3 (default storage)
 
-- Configured in `core_lms/settings.py:171-193`:
-  - `"default"` backend: `S3Boto3Storage`, `default_acl="private"`,
-    `querystring_auth=True`, `querystring_expire=3600`,
+- Configured in `core_lms/settings.py:176-202`:
+  - `"default"` backend: `S3Boto3Storage`, `default_acl=None`,
+    `querystring_auth=False`,
     `file_overwrite=False`.
   - `"staticfiles"` backend: `S3Boto3Storage`,
     `location="static"`, `querystring_auth=False`,
     `file_overwrite=True`. Collected at container start via
     `python manage.py collectstatic --noinput` (`Dockerfile:20`).
 - Bucket domain derived as
-  `f"{AWS_STORAGE_BUCKET_NAME}.s3.amazonaws.com"`
-  (`core_lms/settings.py:166`), with `STATIC_URL` set accordingly
-  (line 168).
+  `f"{AWS_STORAGE_BUCKET_NAME}.s3.{AWS_S3_REGION_NAME}.amazonaws.com"`
+  (`core_lms/settings.py:171`), with `STATIC_URL` set accordingly
+  (line 173).
 - Upload paths (server-computed):
   - `Resource.file` → `resources/{course_id}/{filename}`
     (`apps/learning/services/storage_service.py:4-14`).
@@ -322,7 +322,7 @@ endpoint.**
 - Library: `django-storages[s3]` + `boto3` (`requirements.txt:9-10`).
 - Upload: DRF multipart parser → `FileField` → `S3Boto3Storage.save()`.
 - Download: the serializer renders `file.url`, which `S3Boto3Storage`
-  resolves to a pre-signed URL (1-hour expiry given `querystring_expire=3600`).
+  resolves to a direct public URL via `AWS_S3_CUSTOM_DOMAIN` (no query-string auth).
 
 ### 3.4 Angular → Django (REST)
 
@@ -347,10 +347,12 @@ endpoint.**
 | `AxiomEngineError` in `ScoringService` | caught, stores fallback envelope on `QuizAttempt.adaptive_plan` | `scoring_service.py:92-96` |
 | `AxiomEngineTimeout` or `AxiomEngineError` in `EvaluationViewSet.create` | response includes `axiom_error: {...}`; `adaptive_plan` stays `null` | `evaluation_viewset.py:64-78` |
 
-### 4.2 S3 pre-signed URL expiry
+### 4.2 S3 file access
 
-URLs expire after 3600 s (`core_lms/settings.py:179`). On expiry, the
-frontend re-fetches the parent resource to obtain a fresh signed URL.
+File URLs are direct public links (no query-string auth). Access is
+controlled by the S3 bucket policy which grants `s3:GetObject` on
+`static/*`, `submissions/*`, and `resources/*` prefixes. URLs do not
+expire.
 
 ### 4.3 Database integrity
 

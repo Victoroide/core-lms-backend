@@ -209,15 +209,15 @@ writes (`resource_viewset.py:29-37`). Serializer:
 ```json
 {
   "id": 1, "lesson": 3, "uploaded_by": 2,
-  "file": "https://<bucket>.s3.amazonaws.com/resources/5/lecture.pdf?<pre-signed query>",
+  "file": "https://core-lms-bucket.s3.us-east-1.amazonaws.com/resources/5/lecture.pdf",
   "resource_type": "PDF",
   "title": "Chapter 1 Slides",
   "created_at": "2026-04-16T12:00:00Z"
 }
 ```
 
-`file` is rendered as a pre-signed URL (`querystring_expire=3600`,
-`core_lms/settings.py:179`). Stored S3 key follows
+`file` is rendered as a direct public URL via `AWS_S3_CUSTOM_DOMAIN`
+(`core_lms/settings.py:171`). Stored S3 key follows
 `resources/{course_id}/{filename}`
 (`apps/learning/services/storage_service.py:4-14`).
 
@@ -678,9 +678,10 @@ API documentation UIs backed by `drf_yasg`
 4. On 401 from the refresh endpoint, redirect to login.
 
 ### File URLs
-The `file` field rendered in responses is a pre-signed S3 URL valid for
-3600 s (`querystring_expire=3600`). Refresh by re-GETting the parent
-resource.
+The `file` field rendered in responses is a direct public S3 URL (e.g.
+`https://core-lms-bucket.s3.us-east-1.amazonaws.com/submissions/2/file.pdf`).
+Access is controlled by the S3 bucket policy, not per-object ACLs or
+pre-signed URLs.
 
 ### Heterogeneous `adaptive_plan`
 When consuming `/api/v1/attempts/`, branch on the presence of

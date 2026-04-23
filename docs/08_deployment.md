@@ -9,7 +9,7 @@
 Production stack:
 - **Django / Gunicorn** container built from this repository.
 - **Managed PostgreSQL** (NeonDB in production) via `DATABASE_URL`.
-- **AWS S3** (private ACL + pre-signed URLs) for both media and
+- **AWS S3** (public read via bucket policy) for both media and
   collected static files.
 - **AxiomEngine Go microservice** (sister repo `axiom-reasoning-svc`),
   reachable at `AXIOM_ENGINE_URL`.
@@ -30,7 +30,7 @@ Read at process start. Missing required variables either raise
 | `AXIOM_ENGINE_URL` | yes | `core_lms/settings.py:157` | Base URL of the Go service; default `http://localhost:8080`. |
 | `AWS_ACCESS_KEY_ID` | yes | `core_lms/settings.py:162` | IAM key. |
 | `AWS_SECRET_ACCESS_KEY` | yes | `core_lms/settings.py:163` | IAM secret. |
-| `AWS_STORAGE_BUCKET_NAME` | yes | `core_lms/settings.py:164` | Default `"core-lms-files"`. |
+| `AWS_STORAGE_BUCKET_NAME` | yes | `core_lms/settings.py:166` | Default `"core-lms-bucket"`. |
 | `AWS_S3_REGION_NAME` | no | `core_lms/settings.py:165` | Default `"us-east-1"`. |
 | `CORS_ALLOWED_ORIGINS` | yes (prod) | `core_lms/settings.py:45-51` | Comma-separated; default `"http://localhost:4200"`. |
 | `LOG_LEVEL` | no | `core_lms/settings.py:237, 247` | Default `"INFO"`. |
@@ -91,8 +91,9 @@ Complete before promoting a build:
 - [ ] Go unit tests pass in the `axiom-engine` container.
 - [ ] NeonDB reachable from the deployment environment (network +
       credentials + SSL).
-- [ ] S3 bucket exists with `private` ACL; CORS allows `GET` from the
-      frontend origin for pre-signed URL access.
+- [ ] S3 bucket exists with public-read bucket policy on `static/*`,
+      `submissions/*`, `resources/*`; CORS allows `GET` from the
+      frontend origin.
 - [ ] S3 bucket static-files layout:
       the production Dockerfile runs `collectstatic` on start
       (`Dockerfile:20`), which uploads static assets into
@@ -172,9 +173,8 @@ Configured in `core_lms/settings.py:171-193` via the `STORAGES` dict
 
 ### Default (media) backend — `STORAGES["default"]`
 - `backend`: `storages.backends.s3boto3.S3Boto3Storage`
-- `default_acl`: `"private"`
-- `querystring_auth`: `True` (pre-signed URLs)
-- `querystring_expire`: `3600` (1 hour)
+- `default_acl`: `None` (no per-object ACL; bucket policy handles access)
+- `querystring_auth`: `False` (direct public URLs)
 - `file_overwrite`: `False` (preserves history)
 
 ### Static files backend — `STORAGES["staticfiles"]`
@@ -188,8 +188,8 @@ Allow `GET` from the production frontend origin(s) and from
 `http://localhost:4200` for local development.
 
 ### STATIC_URL
-`f"https://{AWS_STORAGE_BUCKET_NAME}.s3.amazonaws.com/static/"`
-(`core_lms/settings.py:168`). Django templates and collected assets
+`f"https://{AWS_STORAGE_BUCKET_NAME}.s3.{AWS_S3_REGION_NAME}.amazonaws.com/static/"`
+(`core_lms/settings.py:173`). Django templates and collected assets
 reference this base.
 
 ## Observability
