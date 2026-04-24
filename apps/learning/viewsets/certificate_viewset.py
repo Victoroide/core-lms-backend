@@ -2,7 +2,7 @@ from drf_yasg import openapi
 from drf_yasg.utils import swagger_auto_schema
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
-from rest_framework.permissions import IsAuthenticated
+from rest_framework.permissions import IsAuthenticated, AllowAny
 from rest_framework.response import Response
 
 from apps.learning.models import Certificate, Course, LMSUser
@@ -19,7 +19,11 @@ class CertificateViewSet(viewsets.ViewSet):
     **Requires authentication and STUDENT role.**
     """
 
-    permission_classes = [IsAuthenticated, IsStudent]
+    def get_permissions(self):
+        """Allow public access for verification, require student role for generation."""
+        if self.action == "verify":
+            return [AllowAny()]
+        return [IsAuthenticated(), IsStudent()]
 
     @swagger_auto_schema(
         operation_summary="Generate a course-completion certificate",
@@ -126,4 +130,64 @@ class CertificateViewSet(viewsets.ViewSet):
                 "student_id": certificate.student_id,
             },
             status=status.HTTP_201_CREATED,
+        )
+
+    @swagger_auto_schema(
+        operation_summary="Verify a course-completion certificate",
+        operation_description=(
+            "Publicly verifiable endpoint. Returns certificate metadata "
+            "if the provided SHA-256 hash exists in the system."
+        ),
+        tags=["Certificates"],
+        responses={
+            200: openapi.Response(
+                description="Certificate found and verified.",
+                schema=openapi.Schema(
+                    type=openapi.TYPE_OBJECT,
+                    properties={
+                        "is_valid": openapi.Schema(type=openapi.TYPE_BOOLEAN, example=True),
+                        "hash": openapi.Schema(type=openapi.TYPE_STRING, example="a3f8..."),
+                        "issued_at": openapi.Schema(type=openapi.TYPE_STRING, format="date-time"),
+                        "student_name": openapi.Schema(type=openapi.TYPE_STRING, example="John Doe"),
+                        "course_name": openapi.Schema(type=openapi.TYPE_STRING, example="Advanced Programming"),
+                    },
+                ),
+            ),
+            404: "Certificate not found.",
+        },
+    )
+    @action(detail=False, methods=["get"], url_path=r"verify/(?P<hash>[a-f0-9]+)")
+    def verify(self, request, hash=None):
+        """Publicly verify a certificate hash and retrieve its metadata.
+
+        Args:
+            request (Request): The request object.
+            hash (str): The SHA-256 certificate hash from the URL.
+
+        Returns:
+            Response: Certificate metadata with HTTP 200, or 404 if invalid.
+        """
+        try:
+            certificate = Certificate.objects.select_related("student", "course").get(
+                certificate_hash=hash
+            )
+        except Certificate.DoesNotExist:
+            return Response(
+                {"error": "Invalid or non-existent certificate hash."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        student_name = f"{certificate.student.first_name} {certificate.student.last_name}".strip()
+        if not student_name:
+            student_name = certificate.student.username
+
+        return Response(
+            {
+                "is_valid": True,
+                "hash": certificate.certificate_hash,
+                "issued_at": certificate.issued_at.isoformat(),
+                "student_name": student_name,
+                "course_name": certificate.course.name,
+            },
+            status=status.HTTP_200_OK,
         )
