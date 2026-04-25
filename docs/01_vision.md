@@ -54,8 +54,11 @@ submission creation).
 A `LMSUser` whose `role` is `TUTOR` (`apps/learning/models/user_model.py:15`).
 The `IsTutor` permission class (`apps/learning/permissions.py:21`) gates
 write access to the academic ontology (Career, Semester, Course, Module,
-Lesson, Resource, Assignment), the submission-grading action, and the
-analytics dashboard.
+Lesson, Resource, Assignment), quiz authoring via `QuizViewSet.create /
+update / partial_update / destroy`
+(`apps/assessments/viewsets/quiz_viewset.py:31-73`), the submission-grading
+action (`PATCH /api/v1/submissions/{id}/grade/`), and the analytics dashboard
+(`GET /api/v1/analytics/course/{course_id}/dashboard/`).
 
 ### 2.3 System (Django backend + AxiomEngine)
 
@@ -105,15 +108,20 @@ in `requirements.txt`.
   and `BLACKLIST_AFTER_ROTATION=True` (`core_lms/settings.py:136-137`);
   `rest_framework_simplejwt.token_blacklist` is installed
   (`core_lms/settings.py:25`).
-- **RBAC** via custom DRF permission classes reading `LMSUser.role`
-  (`apps/learning/permissions.py:13-18, 30-35`).
+- **Two-layer RBAC** — every protected endpoint first runs
+  `IsAuthenticated` (JWT validation), then runs the role-specific
+  permission class (`IsStudent` or `IsTutor`) defined in
+  `apps/learning/permissions.py:4-35`. Both layers must pass before the
+  viewset action executes.
 - **Token endpoint rate limit:** `RateLimitedTokenView` applies
   `@ratelimit(key="ip", rate="10/m", method="POST", block=False)` and
   returns HTTP 429 when exceeded
   (`apps/learning/viewsets/auth_viewset.py:35-55`).
-- **Private-ACL S3** with pre-signed URLs: `STORAGES["default"]` configures
-  `"default_acl": "private"`, `"querystring_auth": True`,
-  `"querystring_expire": 3600` (`core_lms/settings.py:171-182`).
+- **S3 access via bucket policy** — `STORAGES["default"]` configures
+  `"default_acl": None`, `"querystring_auth": False`,
+  `"file_overwrite": False` (`core_lms/settings.py:183-192`). Files are
+  served as direct public URLs governed by the bucket policy; pre-signed
+  URLs are not used.
 - **Security headers** — `X_FRAME_OPTIONS = "DENY"`,
   `SECURE_CONTENT_TYPE_NOSNIFF = True` (`core_lms/settings.py:214-215`);
   `SECURE_SSL_REDIRECT` driven by env (`core_lms/settings.py:211`).

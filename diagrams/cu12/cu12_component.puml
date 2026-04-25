@@ -1,0 +1,44 @@
+@startuml CU12_Component
+!include ../_shared/global_style.iuml
+
+title CU-12 — Consultar grafo cognitivo: Diagrama de Componentes
+note as N1
+    Django is NOT involved in CU-12.
+    Angular calls AxiomEngine directly on port 8080.
+end note
+
+package "Angular SPA (port 4200)" {
+    component [CognitiveGraphComponent] as CGComp
+    component [HttpClient] as Http
+    component [Cytoscape.js / D3 Renderer] as Renderer
+}
+
+package "AxiomEngine (Go + Fiber, port 8080)" {
+    component [handlers.go\nHTTP handler registration] as Handlers
+    component [graph/memory.go\ngraph classification logic] as GraphMem
+    component [BAML Orchestrator] as BAML
+}
+
+cloud "AWS Bedrock" {
+    component [Amazon Nova Micro] as LLM
+}
+
+CGComp --> Http : build request
+Http --> Handlers : GET /api/v1/tutor/student/:student_id/\ncognitive-graph?topics=...
+Handlers --> GraphMem : ClassifyCognitiveGraph()
+GraphMem --> BAML : structured prompts
+BAML --> LLM : parallel fan-out
+LLM --> BAML : classification responses
+BAML --> GraphMem : merged results
+GraphMem --> Handlers : { nodes[], edges[] }
+Handlers --> Http : HTTP 200 JSON
+Http --> CGComp : { nodes[], edges[] }
+CGComp --> Renderer : render graph
+
+note right of Handlers
+    Resilience:
+    - Circuit breaker (3 failures → open, 15s half-open)
+    - Rate limiter (50 req/min/IP)
+end note
+
+@enduml

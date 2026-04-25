@@ -1,0 +1,45 @@
+@startuml CU08_Sequence
+!include ../_shared/global_style.iuml
+skinparam responseMessageBelowArrow true
+autonumber "<b>"
+
+title CU-08 — Consultar quizzes disponibles: Diagrama de Secuencia
+
+actor "Estudiante / Público" as Actor
+boundary "Angular\nQuizListComponent" as Angular
+control "QuizViewSet\n(quiz_viewset.py:12)" as ViewSet
+entity "Quiz\n(quiz_model.py:4)" as Model
+entity "QuizListSerializer\n(quiz_serializer.py:34)" as ListSerializer
+entity "QuizDetailSerializer\n(quiz_serializer.py:42)" as DetailSerializer
+database "NeonDB\nPostgreSQL" as DB
+
+== Listar quizzes activos ==
+
+Actor -> Angular : Navegar a lista de quizzes
+Angular -> ViewSet : GET /api/v1/quizzes/
+
+ViewSet -> ViewSet : get_permissions() → [AllowAny()]
+ViewSet -> ViewSet : get_queryset()\nfilter(is_active=True)
+ViewSet -> Model : Quiz.objects.filter(is_active=True)
+Model -> DB : SELECT * FROM quiz\nWHERE is_active = True\nORDER BY created_at DESC
+DB --> Model : QuerySet
+ViewSet -> ListSerializer : QuizListSerializer(queryset, many=True)
+ListSerializer --> ViewSet : [{ id, title, course, time_limit_minutes,\nis_active, question_count }, ...]
+ViewSet --> Angular : HTTP 200
+Angular --> Actor : Mostrar lista de quizzes
+
+== Detalle de un quiz ==
+
+Actor -> Angular : Seleccionar quiz {id}
+Angular -> ViewSet : GET /api/v1/quizzes/{id}/
+
+ViewSet -> ViewSet : get_permissions() → [AllowAny()]
+ViewSet -> Model : Quiz.objects.get(pk={id})
+Model -> DB : SELECT * FROM quiz WHERE pk = {id}\nJOIN question ON question.quiz_id = quiz.id\nJOIN answer_choice ON answer_choice.question_id = question.id
+DB --> Model : Quiz with nested data
+ViewSet -> DetailSerializer : QuizDetailSerializer(instance)
+DetailSerializer --> ViewSet : { id, title, description, course,\ntime_limit_minutes, is_active,\nquestions: [{ id, text, concept_id, order,\nchoices: [{ id, text }] }] }
+ViewSet --> Angular : HTTP 200
+Angular --> Actor : Renderizar quiz con preguntas y opciones
+
+@enduml

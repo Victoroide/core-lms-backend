@@ -222,6 +222,11 @@ Evaluation       1 → *  FailedTopic       (CASCADE)
   related_name="telemetry" (lines 7-11).
 - `time_on_task_seconds` PositiveIntegerField(default=0) (line 12);
   `clicks` PositiveIntegerField(default=0) (line 13).
+- When `ScoringService.score_and_evaluate` auto-creates a telemetry row
+  after a quiz attempt, `clicks` is hard-coded to **0** at insert time
+  (`apps/assessments/services/scoring_service.py:74-84`); the field is
+  not derived from real client click events. Real click counts only
+  appear when a row is created via `EvaluationTelemetryViewSet.create`.
 
 ### Certificate — `apps/learning/models/certificate_model.py`
 - `student` — FK→AUTH_USER_MODEL, CASCADE (lines 11-15).

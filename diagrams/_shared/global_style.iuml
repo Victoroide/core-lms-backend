@@ -1,0 +1,65 @@
+' =========================================================================
+' AXIOM LMS — PLANTUML STRICT MODE (UML 2.5.1 + C4 COMPLIANT)
+' =========================================================================
+skinparam shadowing false
+skinparam backgroundColor White
+skinparam defaultFontName Arial
+skinparam defaultFontSize 12
+skinparam monochrome true
+skinparam style strictuml
+skinparam linetype ortho
+skinparam nodesep 50
+skinparam ranksep 60
+skinparam padding 3
+skinparam classAttributeIconSize 0
+skinparam responseMessageBelowArrow true
+hide circle
+
+<style>
+root {
+    FontName "Arial"
+    FontSize 12
+    FontColor black
+    LineColor black
+    LineThickness 1.0
+    BackgroundColor white
+}
+document {
+    BackgroundColor white
+}
+element {
+    RoundCorner 0
+    Shadowing 0
+}
+classDiagram {
+    class {
+        BackgroundColor white
+        HeaderBackgroundColor #E8E8E8
+        BorderThickness 1.2
+    }
+    arrow {
+        LineThickness 1.0
+    }
+}
+sequenceDiagram {
+    participant {
+        BackgroundColor white
+        BorderThickness 1.2
+    }
+    lifeLine {
+        LineColor black
+        LineStyle 0
+    }
+}
+componentDiagram {
+    component {
+        BackgroundColor white
+        BorderThickness 1.2
+    }
+    interface {
+        BackgroundColor white
+        BorderColor black
+        BorderThickness 1.2
+    }
+}
+</style>

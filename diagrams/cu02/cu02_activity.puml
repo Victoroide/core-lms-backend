@@ -1,0 +1,51 @@
+@startuml CU02_Activity
+!include ../_shared/global_style.iuml
+
+title CU-02 — Completar onboarding VARK: Diagrama de Actividad
+
+|Estudiante|
+start
+:Completar cuestionario VARK\n(seleccionar valores 0-10 por categoría);
+:POST /api/v1/users/{id}/onboard/\n{ answers: [{category, value}] };
+
+|UserViewSet|
+:get_object() → user;
+if (user.pk == request.user.pk?) then (sí)
+else (no)
+    :Retornar HTTP 403\n"Cannot update another user's profile.";
+    stop
+endif
+
+:VARKOnboardingSerializer(data=request.data);
+:is_valid(raise_exception=True);
+
+if (Validación exitosa?) then (sí)
+else (no)
+    :Retornar HTTP 400\nValidation errors;
+    stop
+endif
+
+:scores = defaultdict(int);
+:for answer in validated_data["answers"]:\n  scores[answer["category"]] += answer["value"];
+
+if (scores vacío?) then (sí)
+    :Retornar HTTP 400\n"No answers provided.";
+    stop
+else (no)
+endif
+
+:dominant = max(scores, key=scores.get);
+:user.vark_dominant = dominant;
+:user.save(update_fields=["vark_dominant"]);
+
+|NeonDB PostgreSQL|
+:UPDATE lms_user SET vark_dominant WHERE pk;
+
+|UserViewSet|
+:Retornar HTTP 200\n{ student_id, vark_scores, vark_dominant };
+
+|Estudiante|
+:Visualizar perfil VARK dominante;
+stop
+
+@enduml

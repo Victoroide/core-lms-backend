@@ -1,0 +1,91 @@
+@startuml CU09_Activity
+!include ../_shared/global_style.iuml
+
+title CU-09 — Rendir quiz: Diagrama de Actividad
+
+|Estudiante|
+start
+:Iniciar sesión de quiz;
+
+fork
+    |Angular ProctoringService|
+    :Activar face-api.js\ny Visibility API;
+    repeat
+        :Detectar evento\n(tab_switched / face_not_detected / multiple_faces);
+        :POST /api/v1/proctoring/logs/\n{ events: [...] };
+        |ProctoringViewSet|
+        :ProctoringBulkSerializer(data);
+        :is_valid(raise_exception=True);
+        :ProctoringLog.objects.bulk_create(logs);
+        |NeonDB PostgreSQL|
+        :INSERT INTO proctoring_log × N;
+        |ProctoringViewSet|
+        :Retornar HTTP 201 { "ingested": N };
+    repeat while (quiz en progreso) is (sí)
+
+fork again
+    |Estudiante|
+    :Responder preguntas del quiz;
+    :Enviar respuestas;
+    :POST /api/v1/attempts/\n{ quiz_id, student_id, answers };
+
+    |AttemptViewSet|
+    :AttemptSubmitSerializer(data);
+    :is_valid(raise_exception=True);
+
+    if (Student exists?) then (sí)
+    else (no)
+        :Retornar HTTP 400\n"Student not found.";
+        stop
+    endif
+
+    if (Quiz exists?) then (sí)
+    else (no)
+        :Retornar HTTP 400\n"Quiz not found.";
+        stop
+    endif
+
+    :QuizAttempt.objects.create(student, quiz);
+    :AttemptAnswer.objects.bulk_create(answers);
+
+    |ScoringService|
+    :score_and_evaluate(attempt);
+    :attempt.end_time = timezone.now();
+    :Computar correct_count, concept_results;
+    :attempt.final_score = correct_count;
+    :attempt.is_submitted = True;
+    :attempt.save();
+
+    :Evaluation.objects.create();
+
+    while (concepto con correct < total) is (siguiente)
+        :FailedTopic.objects.create();
+    endwhile (fin)
+
+    :EvaluationTelemetry.objects.create();
+
+    if (failed_concepts existen?) then (sí)
+        :AxiomEngineClient().request_adaptive_plan();
+
+        if (AxiomEngine responde OK?) then (sí)
+            :adaptive_plan = response.json();
+        else (no: timeout / error)
+            :adaptive_plan = { "plan": [], "fallback": true };
+        endif
+    else (no)
+        :adaptive_plan = None;
+    endif
+
+    :attempt.adaptive_plan = adaptive_plan;
+    :attempt.save(update_fields=["adaptive_plan"]);
+
+    |AttemptViewSet|
+    :Retornar HTTP 201\n{ score, failed_concepts, adaptive_plan, ... };
+
+end fork
+
+|Estudiante|
+:Visualizar resultado y plan adaptativo;
+stop
+
+@enduml

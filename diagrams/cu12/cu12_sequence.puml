@@ -1,0 +1,48 @@
+@startuml CU12_Sequence
+!include ../_shared/global_style.iuml
+skinparam responseMessageBelowArrow true
+autonumber "<b>"
+
+title CU-12 — Consultar grafo cognitivo del estudiante: Diagrama de Secuencia
+note across
+    CU-12: Angular llama a AxiomEngine DIRECTAMENTE.
+    Django NO participa en este caso de uso.
+end note
+
+actor Tutor as Actor
+boundary "Angular\nCognitiveGraphComponent" as Angular
+participant "AxiomEngine\n(Go + Fiber, port 8080)\nhandlers.go:150-186" as Handler
+participant "graph/memory.go\n:188-235" as GraphEngine
+participant "BAML → AWS Bedrock\n(Amazon Nova Micro)" as LLM
+
+Actor -> Angular : Seleccionar estudiante {student_id}\ny tópicos a consultar
+Angular -> Handler : GET /api/v1/tutor/student/{student_id}/cognitive-graph?topics=...
+
+Handler -> Handler : Parse student_id from URL path\nParse topics from query params
+
+Handler -> GraphEngine : ClassifyCognitiveGraph(student_id, topics)
+
+GraphEngine -> GraphEngine : Subgraph extraction\nfrom knowledge graph
+GraphEngine -> GraphEngine : Topological sort\nof concept dependencies
+
+GraphEngine -> LLM : Parallel BAML fan-out\n(structured prompts)
+LLM --> GraphEngine : Classification responses
+
+GraphEngine -> GraphEngine : Merge and deduplication
+GraphEngine -> GraphEngine : Hallucination validation
+GraphEngine -> GraphEngine : Response enrichment
+
+note right of GraphEngine
+    Node state classification:
+    - "failed": concept student did not pass
+    - "learning": prerequisite of a failed concept
+    - "mastered": concept student passed
+end note
+
+GraphEngine --> Handler : { nodes[], edges[] }
+Handler --> Angular : HTTP 200\n{ nodes: [{ id, label, state }],\nedges: [{ source, target }] }
+
+Angular -> Angular : Render with\nCytoscape.js / D3
+Angular --> Actor : Visualizar grafo cognitivo\ncon nodos coloreados por estado
+
+@enduml

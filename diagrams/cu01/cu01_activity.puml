@@ -1,0 +1,46 @@
+@startuml CU01_Activity
+!include ../_shared/global_style.iuml
+
+title CU-01 — Gestionar sesión: Diagrama de Actividad
+
+|Angular SPA|
+start
+:Usuario ingresa username y password;
+:POST /api/v1/auth/token/\n{ username, password };
+
+|RateLimitedTokenView|
+if (request.limited?) then (sí)
+    :Retornar HTTP 429\n"Too many login attempts.";
+    |Angular SPA|
+    :Mostrar mensaje de rate limit;
+    stop
+else (no)
+endif
+
+|AxiomTokenObtainPairSerializer|
+:validate(attrs);
+:authenticate(username, password);
+
+|NeonDB PostgreSQL|
+:SELECT * FROM lms_user WHERE username = ?;
+
+|AxiomTokenObtainPairSerializer|
+if (Credenciales válidas?) then (sí)
+    :get_token(user);
+    :Inyectar claims: role, vark_dominant, user_id;
+    :Construir response: { access, refresh, user };
+    |RateLimitedTokenView|
+    :Retornar HTTP 200;
+    |Angular SPA|
+    :Almacenar access + refresh tokens;
+    :Configurar AuthInterceptor\ncon Bearer token;
+    stop
+else (no)
+    |RateLimitedTokenView|
+    :Retornar HTTP 401\n"No active account...";
+    |Angular SPA|
+    :Mostrar error de credenciales;
+    stop
+endif
+
+@enduml

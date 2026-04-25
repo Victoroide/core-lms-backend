@@ -1,0 +1,63 @@
+@startuml CU10_Sequence
+!include ../_shared/global_style.iuml
+skinparam responseMessageBelowArrow true
+autonumber "<b>"
+
+title CU-10 — Revisar intentos propios de quiz: Diagrama de Secuencia
+
+actor Estudiante as Actor
+boundary "Angular\nAttemptHistoryComponent" as Angular
+control "AttemptViewSet\n(attempt_viewset.py:101)" as ViewSet
+entity "AttemptResultSerializer\n(attempt_serializer.py:21)" as Serializer
+entity "QuizAttempt\n(attempt_model.py:5)" as Model
+database "NeonDB\nPostgreSQL" as DB
+
+== Listar intentos propios ==
+
+Actor -> Angular : Ver historial de quizzes
+Angular -> ViewSet : GET /api/v1/attempts/\nAuthorization: Bearer <token>
+
+ViewSet -> ViewSet : permission_classes → [IsAuthenticated, IsStudent]
+
+alt user.role != "STUDENT"
+    ViewSet --> Angular : HTTP 403\n"Access restricted to students."
+else user.role == "STUDENT"
+    ViewSet -> Model : QuizAttempt.objects.filter(\nstudent=request.user)\n.order_by("-start_time")
+    Model -> DB : SELECT * FROM quiz_attempt\nWHERE student_id = {request.user.pk}\nORDER BY start_time DESC
+    DB --> Model : QuerySet
+
+    ViewSet -> ViewSet : PageNumberPagination().paginate_queryset()
+    ViewSet -> Serializer : AttemptResultSerializer(page, many=True)
+    Serializer --> ViewSet : [{ id, student, quiz, start_time, end_time,\nfinal_score, is_submitted, adaptive_plan }, ...]
+    ViewSet --> Angular : HTTP 200\n{ count, next, previous, results: [...] }
+end
+
+Angular --> Actor : Mostrar lista paginada de intentos
+
+== Detalle de un intento ==
+
+Actor -> Angular : Ver detalle del intento {id}
+Angular -> ViewSet : GET /api/v1/attempts/{id}/\nAuthorization: Bearer <token>
+
+ViewSet -> Model : QuizAttempt.objects.get(\npk={id}, student=request.user)
+Model -> DB : SELECT * FROM quiz_attempt\nWHERE pk = {id} AND student_id = {request.user.pk}
+
+alt not found or not owned
+    DB --> Model : DoesNotExist
+    ViewSet --> Angular : HTTP 404\n{ "error": "not_found",\n"details": "Attempt not found." }
+else found
+    DB --> Model : QuizAttempt instance
+    ViewSet -> Serializer : AttemptResultSerializer(attempt)
+    note right
+        adaptive_plan is the JSONB field:
+        - AxiomEngine plan if available
+        - { "plan": [], "fallback": true } if Go was unreachable
+        - null if no failed concepts
+    end note
+    Serializer --> ViewSet : { id, student, quiz, start_time, end_time,\nfinal_score, is_submitted, adaptive_plan }
+    ViewSet --> Angular : HTTP 200
+end
+
+Angular --> Actor : Mostrar detalle del intento\ny plan adaptativo
+
+@enduml

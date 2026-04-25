@@ -118,6 +118,15 @@ Django tests patch the client so no live Go service is required:
 @patch("apps.assessments.services.scoring_service.AxiomEngineClient")
 ```
 
+`AxiomEngineClient`'s exception path
+(`apps/learning/services/axiom_service.py:96-107`) — `requests.Timeout`
+or `requests.ConnectionError` → `{"plan": [], "fallback": True}` — is
+the primary isolation point for resilience tests.
+`apps/assessments/tests/test_scoring.py` (`TestScoringService`) and
+`apps/learning/tests/test_views.py` exercise this fallback path by
+patching the client to raise; the persisted `QuizAttempt.adaptive_plan`
+is asserted to equal the fallback envelope.
+
 ### Bypassing S3
 
 File-upload tests override the storage backend:

@@ -1,0 +1,124 @@
+@startuml CU09_Sequence
+!include ../_shared/global_style.iuml
+skinparam responseMessageBelowArrow true
+autonumber "<b>"
+
+title CU-09 — Rendir quiz con supervisión de proctoring: Diagrama de Secuencia
+
+actor Estudiante as Actor
+boundary "Angular\nQuizComponent" as AngularQuiz
+boundary "Angular\nProctoringService" as AngularProc
+control "AttemptViewSet\n(attempt_viewset.py:101)" as AttemptVS
+control "ProctoringViewSet\n(proctoring_viewset.py:73)" as ProctoringVS
+entity "AttemptSubmitSerializer\n(attempt_serializer.py:11)" as AttemptSer
+entity "ProctoringBulkSerializer\n(proctoring_serializer.py:13)" as ProcSer
+entity "ScoringService\n(scoring_service.py:14)" as Scoring
+entity "AxiomEngineClient\n(axiom_service.py:14)" as AxiomClient
+entity "QuizAttempt\n(attempt_model.py:5)" as Attempt
+entity "AttemptAnswer\n(attempt_model.py:40)" as Answer
+entity "ProctoringLog\n(proctoring_model.py:4)" as ProcLog
+entity "Evaluation\n(evaluation_model.py:5)" as Eval
+entity "FailedTopic\n(failed_topic_model.py:4)" as FT
+entity "EvaluationTelemetry\n(telemetry_model.py:4)" as Telemetry
+database "NeonDB\nPostgreSQL" as DB
+participant "AxiomEngine\n(Go, port 8080)" as AxiomGo
+
+Actor -> AngularQuiz : Iniciar quiz
+
+par Proctoring stream (periódico durante la sesión)
+    AngularProc -> AngularProc : face-api.js detecta eventos\nVisibility API detecta tab switches
+    loop cada batch de eventos
+        AngularProc -> ProctoringVS : POST /api/v1/proctoring/logs/\n{ events: [{ attempt, event_type,\ntimestamp, severity_score }] }
+        ProctoringVS -> ProctoringVS : IsStudent.has_permission()
+        ProctoringVS -> ProcSer : ProctoringBulkSerializer(data=request.data)
+        ProcSer -> ProcSer : is_valid(raise_exception=True)
+        ProctoringVS -> ProcLog : ProctoringLog.objects.bulk_create(logs)
+        ProcLog -> DB : INSERT INTO proctoring_log\n(attempt_id, event_type, timestamp,\nseverity_score) × N
+        DB --> ProcLog : created rows
+        ProctoringVS --> AngularProc : HTTP 201\n{ "ingested": <count> }
+    end
+else Quiz submission (fin de sesión)
+    Actor -> AngularQuiz : Completar y enviar respuestas
+    AngularQuiz -> AttemptVS : POST /api/v1/attempts/\n{ quiz_id, student_id,\nanswers: [{ question_id, selected_choice_id }] }
+
+    AttemptVS -> AttemptVS : IsStudent.has_permission()
+    AttemptVS -> AttemptSer : AttemptSubmitSerializer(data=request.data)
+    AttemptSer -> AttemptSer : is_valid(raise_exception=True)
+
+    AttemptVS -> DB : LMSUser.objects.get(pk=student_id)
+    alt Student not found
+        AttemptVS --> AngularQuiz : HTTP 400\n{ "error": "validation_error",\n"details": "Student not found." }
+    end
+
+    AttemptVS -> DB : Quiz.objects.get(pk=quiz_id)
+    alt Quiz not found
+        AttemptVS --> AngularQuiz : HTTP 400\n{ "error": "validation_error",\n"details": "Quiz not found." }
+    end
+
+    AttemptVS -> Attempt : QuizAttempt.objects.create(student, quiz)
+    Attempt -> DB : INSERT INTO quiz_attempt\n(student_id, quiz_id, start_time,\nis_submitted=False)
+    DB --> Attempt : QuizAttempt row
+
+    AttemptVS -> Answer : AttemptAnswer.objects.bulk_create(answer_objects)
+    Answer -> DB : INSERT INTO attempt_answer\n(attempt_id, question_id,\nselected_choice_id) × N
+    DB --> Answer : created rows
+
+    AttemptVS -> Scoring : ScoringService().score_and_evaluate(attempt)
+
+    Scoring -> Attempt : attempt.end_time = timezone.now()
+    Scoring -> DB : SELECT attempt_answers\nJOIN question, selected_choice
+    DB --> Scoring : answers with is_correct
+
+    Scoring -> Scoring : Compute correct_count,\nconcept_results per concept_id
+
+    Scoring -> Attempt : attempt.final_score = correct_count\nattempt.is_submitted = True
+    Attempt -> DB : UPDATE quiz_attempt\nSET final_score, is_submitted, end_time
+    DB --> Attempt : OK
+
+    Scoring -> Eval : Evaluation.objects.create(\nstudent, course, score, max_score)
+    Eval -> DB : INSERT INTO evaluation
+    DB --> Eval : Evaluation row
+
+    loop por cada concepto con correct < total
+        Scoring -> FT : FailedTopic.objects.create(\nevaluation, concept_id, score, max_score)
+        FT -> DB : INSERT INTO failed_topic
+        DB --> FT : FailedTopic row
+    end
+
+    Scoring -> Telemetry : EvaluationTelemetry.objects.create(\nevaluation, time_on_task_seconds, clicks=0)
+    Telemetry -> DB : INSERT INTO evaluation_telemetry
+    DB --> Telemetry : Telemetry row
+
+    alt failed_concepts exist
+        Scoring -> AxiomClient : AxiomEngineClient()\n.request_adaptive_plan(evaluation.pk)
+        AxiomClient -> DB : Evaluation.objects.get(pk)\nwith select_related, prefetch_related
+        DB --> AxiomClient : Evaluation + FailedTopics
+
+        AxiomClient -> AxiomGo : POST /api/v1/adaptive-plan\n{ student_id, course_id,\nfailed_topics, vark_profile }
+
+        alt AxiomEngine OK
+            AxiomGo --> AxiomClient : HTTP 200\n{ items: [...], _meta: {...} }
+            AxiomClient --> Scoring : adaptive_plan dict
+        else ConnectionError / Timeout
+            AxiomClient --> Scoring : { "plan": [], "fallback": true }
+        else Non-2xx response
+            AxiomClient --> Scoring : raise AxiomEngineError
+            Scoring -> Scoring : catch → { "plan": [], "fallback": true }
+        end
+    else no failed concepts
+        Scoring -> Scoring : adaptive_plan = None
+    end
+
+    Scoring -> Attempt : attempt.adaptive_plan = adaptive_plan
+    Attempt -> DB : UPDATE quiz_attempt\nSET adaptive_plan = <JSONB>
+    DB --> Attempt : OK
+
+    Scoring --> AttemptVS : { score, max_score, failed_concepts,\nevaluation_id, adaptive_plan }
+
+    AttemptVS -> AttemptVS : AttemptResultSerializer(attempt).data\n.update(result)
+    AttemptVS --> AngularQuiz : HTTP 201\n{ id, student, quiz, start_time,\nend_time, final_score, is_submitted,\nadaptive_plan, score, max_score,\nfailed_concepts, evaluation_id }
+end
+
+AngularQuiz --> Actor : Mostrar resultado del quiz\ny plan adaptativo
+
+@enduml

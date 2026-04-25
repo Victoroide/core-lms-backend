@@ -56,11 +56,12 @@ GraphRAG reasoning.
 
 | Document | Description |
 |----------|-------------|
-| [01_vision.md](01_vision.md) | System Vision and Quality Attributes |
-| [02_use_cases.md](02_use_cases.md) | Use Case Specifications |
-| [03_domain_model.md](03_domain_model.md) | Domain Model and Relationships |
-| [04_architecture.md](04_architecture.md) | System Architecture |
-| [05_database_schema.md](05_database_schema.md) | Database Schema Reference |
-| [06_api_reference.md](06_api_reference.md) | API Endpoint Reference |
-| [07_testing.md](07_testing.md) | Testing Strategy and Commands |
-| [08_deployment.md](08_deployment.md) | Production Deployment Guide |
+| [01_vision.md](01_vision.md) | System purpose, actors, scope, and quality attributes (security, availability, maintainability, observability). |
+| [02_use_cases.md](02_use_cases.md) | High-level index of CU-01 through CU-13 (one row per use case, with primary endpoint and owning app). |
+| [03_domain_model.md](03_domain_model.md) | Class diagram, relationships, and per-model field descriptions for all 22 entities. |
+| [04_architecture.md](04_architecture.md) | Deployment topology, Django/Go components, communication patterns, error handling, and known contract violations. |
+| [05_database_schema.md](05_database_schema.md) | Table-by-table column reference, type mappings, soft-delete policy, and migration policy. |
+| [06_api_reference.md](06_api_reference.md) | Endpoint-by-endpoint reference with permissions, request/response shapes, and status codes. |
+| [07_testing.md](07_testing.md) | Four-layer test strategy (unit, integration, E2E bash, Go), test files, and run commands. |
+| [08_deployment.md](08_deployment.md) | Environment variables, Dockerfile, S3 bucket requirements, Go service build, and pre-deployment checklist. |
+| [use_cases/](use_cases/) | Detailed end-to-end flow documentation (one file per use case: CU-01_auth.md through CU-13_certificate.md). |

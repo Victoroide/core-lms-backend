@@ -1,0 +1,67 @@
+@startuml CU13_State
+!include ../_shared/global_style.iuml
+hide empty description
+
+title CU-13 — Certificate: Diagrama de Estado
+
+[*] --> EligibilityCheck : POST /api/v1/certificates/generate/\n{ student_id, course_id }
+
+state EligibilityCheck {
+    EligibilityCheck : entry / _verify_eligibility(student, course)
+    EligibilityCheck : do / query Evaluation.score >= 60.00
+    EligibilityCheck : do / query QuizAttempt.final_score >= 60.00
+}
+
+EligibilityCheck --> Ineligible : [NOT has_passing_evaluation\nAND NOT has_passing_quiz]
+
+state Ineligible {
+    Ineligible : entry / raise CertificateEligibilityError
+    Ineligible : HTTP 403
+}
+
+Ineligible --> [*]
+
+EligibilityCheck --> ExistenceCheck : [eligible]
+
+state ExistenceCheck {
+    ExistenceCheck : entry / Certificate.objects.filter(\nstudent, course).first()
+}
+
+ExistenceCheck --> Existing : [certificate found]
+ExistenceCheck --> HashGeneration : [no certificate]
+
+state Existing {
+    Existing : return existing certificate (idempotent)
+    Existing : HTTP 201
+}
+
+Existing --> [*]
+
+state HashGeneration {
+    HashGeneration : entry / issued_at = timezone.now()
+    HashGeneration : do / SHA-256("{student_id}:{course_id}:{issued_at}")
+}
+
+HashGeneration --> Persisting
+
+state Persisting {
+    Persisting : entry / Certificate.objects.create()
+}
+
+Persisting --> Issued : [INSERT OK]
+Persisting --> RaceResolved : [IntegrityError]
+
+state RaceResolved {
+    RaceResolved : entry / Certificate.objects.get(student, course)
+    RaceResolved : HTTP 201
+}
+
+state Issued {
+    Issued : HTTP 201
+    Issued : { certificate_hash, issued_at, course_id, student_id }
+}
+
+RaceResolved --> [*]
+Issued --> [*]
+
+@enduml

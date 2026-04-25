@@ -31,6 +31,14 @@
   attempts, proctoring). Unhandled 500s pass through
   `core_lms.exception_handler.custom_exception_handler` as
   `{"detail": "An unexpected error occurred. Please try again later."}`.
+- **Standard status codes:** unless an endpoint section explicitly states
+  otherwise, every endpoint may return `200`/`201` on success, `400` on
+  body / validation failure, `401` when the JWT is missing or invalid,
+  `403` when the role check fails (`IsStudent` or `IsTutor`), and `404`
+  when a referenced row does not exist or is hidden by row-level
+  scoping. Per-endpoint sections list only the codes that diverge from
+  this baseline (e.g. `429` for rate-limited endpoints). The full set is
+  consolidated in **Appendix C**.
 
 ---
 
@@ -363,8 +371,9 @@ Behaviour (`attempt_viewset.py:139-186`):
 2. Creates `QuizAttempt` and bulk-inserts `AttemptAnswer` rows.
 3. `ScoringService.score_and_evaluate(attempt)` computes score,
    creates Evaluation / FailedTopic / EvaluationTelemetry, and stores
-   `adaptive_plan` on the attempt (see 02_use_cases.md § UC-01 for the
-   service call chain).
+   `adaptive_plan` on the attempt (see
+   [`use_cases/CU-09_quiz_attempt.md`](use_cases/CU-09_quiz_attempt.md)
+   for the full service call chain).
 4. Response (201) merges `AttemptResultSerializer(attempt).data` with
    the service result dict:
 

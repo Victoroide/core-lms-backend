@@ -135,6 +135,30 @@ django-filter==24.3
 django-ratelimit==4.1.0
 ```
 
+## Build & run the AxiomEngine Go microservice
+
+The Go service lives in the sister repository `axiom-reasoning-svc`. Its
+entrypoint is `cmd/server/main.go` and it binds to `:${PORT:-8080}`.
+
+```bash
+# Local build + run (from axiom-reasoning-svc/)
+make generate    # runs baml-cli to regenerate Go bindings under baml_client/
+make build       # go build -o bin/axiom-server ./cmd/server
+make run         # runs ./bin/axiom-server
+
+# Docker (multi-stage; CGO_ENABLED=1 is required for BAML's FFI runtime)
+docker build -t axiom-reasoning-svc:latest .
+docker run -p 8080:8080 --env-file .env axiom-reasoning-svc:latest
+
+# Or via the repo-local docker compose (this Django repo)
+docker compose build axiom-engine
+docker compose up axiom-engine
+```
+
+The Fiber server registers routes via `handler.RegisterRoutes(app)` in
+`cmd/server/main.go` and exposes `GET /health` for orchestrator probes.
+The pipeline expects AWS Bedrock credentials (Nova Micro) at runtime.
+
 ## Run
 
 ```bash

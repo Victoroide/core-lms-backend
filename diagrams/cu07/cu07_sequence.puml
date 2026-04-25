@@ -1,0 +1,61 @@
+@startuml CU07_Sequence
+!include ../_shared/global_style.iuml
+skinparam responseMessageBelowArrow true
+autonumber "<b>"
+
+title CU-07 — Gestionar entregas y calificar: Diagrama de Secuencia
+
+actor Tutor as Actor
+boundary "Angular\nGradingComponent" as Angular
+control "SubmissionViewSet\n(submission_viewset.py:139)" as ViewSet
+entity "Submission\n(submission_model.py:8)" as Model
+entity "SubmissionSerializer\n(submission_serializer.py)" as Serializer
+database "NeonDB\nPostgreSQL" as DB
+
+== Listar entregas (tutor ve todas) ==
+
+Actor -> Angular : Ver entregas del curso
+Angular -> ViewSet : GET /api/v1/submissions/\nAuthorization: Bearer <token>
+
+ViewSet -> ViewSet : get_permissions() → [IsAuthenticated()]
+ViewSet -> ViewSet : get_queryset()\n→ role == "TUTOR" → all submissions
+ViewSet -> Model : Submission.objects.select_related(...).all()
+Model -> DB : SELECT * FROM submission\nWHERE is_deleted = False
+DB --> Model : QuerySet
+ViewSet --> Angular : HTTP 200\n[{ id, assignment, student, file, submitted_at, grade, graded_at }, ...]
+
+== Calificar entrega ==
+
+Actor -> Angular : Calificar submission {id}\ncon grade = 85.50
+Angular -> ViewSet : PATCH /api/v1/submissions/{id}/grade/\n{ "grade": 85.50 }\nAuthorization: Bearer <token>
+
+ViewSet -> ViewSet : permission_classes → [IsTutor()]
+
+alt user.role != "TUTOR"
+    ViewSet --> Angular : HTTP 403\n"Access restricted to tutors."
+else user.role == "TUTOR"
+    ViewSet -> Model : get_object() → submission
+    Model -> DB : SELECT * FROM submission WHERE pk = {id}
+    DB --> Model : Submission instance
+
+    alt grade is None
+        ViewSet --> Angular : HTTP 400\n{ "error": "grade is required." }
+    else grade provided
+        ViewSet -> ViewSet : Decimal(str(grade_value))
+        
+        alt InvalidOperation / ValueError
+            ViewSet --> Angular : HTTP 400\n{ "error": "Invalid grade value." }
+        else valid decimal
+            ViewSet -> Model : submission.grade = grade_decimal\nsubmission.graded_at = timezone.now()
+            Model -> DB : UPDATE submission\nSET grade = 85.50,\ngraded_at = NOW()\nWHERE pk = {id}
+            DB --> Model : OK
+            ViewSet -> Serializer : SubmissionSerializer(submission)
+            Serializer --> ViewSet : serialized data
+            ViewSet --> Angular : HTTP 200\n{ id, assignment, student, file,\nsubmitted_at, grade: 85.50, graded_at }
+        end
+    end
+end
+
+Angular --> Actor : Confirmar calificación aplicada
+
+@enduml

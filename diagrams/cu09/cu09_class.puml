@@ -1,0 +1,100 @@
+@startuml CU09_Class
+!include ../_shared/global_style.iuml
+
+title CU-09 — Rendir quiz con supervisión de proctoring: Diagrama de Clases
+
+package "apps.assessments.models" <<Entity>> {
+    class QuizAttempt <<Entity>> {
+        + student: FK → LMSUser (CASCADE)
+        + quiz: FK → Quiz (CASCADE)
+        + start_time: DateTimeField(auto_now_add)
+        + end_time: DateTimeField(null)
+        + final_score: DecimalField(null)
+        + is_submitted: BooleanField(default=False)
+        + adaptive_plan: JSONField(null)
+    }
+
+    class AttemptAnswer <<Entity>> {
+        + attempt: FK → QuizAttempt (CASCADE)
+        + question: FK → Question (CASCADE)
+        + selected_choice: FK → AnswerChoice (CASCADE)
+        --
+        <<unique_together>> (attempt, question)
+    }
+
+    class ProctoringLog <<Entity>> {
+        + attempt: FK → QuizAttempt (CASCADE)
+        + event_type: CharField [tab_switched | face_not_detected | multiple_faces]
+        + timestamp: DateTimeField
+        + severity_score: DecimalField(default=1.00)
+    }
+}
+
+package "apps.assessments.viewsets" <<Boundary>> {
+    class AttemptViewSet <<Boundary>> {
+        + permission_classes: [IsAuthenticated, IsStudent]
+        --
+        + create(request): Response
+        + list(request): Response
+        + retrieve(request, pk): Response
+    }
+
+    class ProctoringViewSet <<Boundary>> {
+        + permission_classes: [IsAuthenticated, IsStudent]
+        --
+        + create(request): Response
+    }
+}
+
+package "apps.assessments.services.scoring_service" <<Control>> {
+    class ScoringService <<Control>> {
+        --
+        + score_and_evaluate(attempt: QuizAttempt): dict
+    }
+}
+
+package "apps.learning.services.axiom_service" <<Entity>> {
+    class AxiomEngineClient <<Entity>> {
+        - base_url: str
+        --
+        + __init__()
+        + request_adaptive_plan(evaluation_id: int): dict
+    }
+}
+
+package "apps.learning.models" <<Entity>> {
+    class Evaluation <<Entity>> {
+        + student: FK → LMSUser
+        + course: FK → Course
+        + score: DecimalField
+        + max_score: DecimalField
+        + created_at: DateTimeField
+    }
+
+    class FailedTopic <<Entity>> {
+        + evaluation: FK → Evaluation
+        + concept_id: CharField
+        + score: DecimalField
+        + max_score: DecimalField
+    }
+
+    class EvaluationTelemetry <<Entity>> {
+        + evaluation: OneToOne → Evaluation
+        + time_on_task_seconds: PositiveIntegerField
+        + clicks: PositiveIntegerField
+    }
+}
+
+QuizAttempt "1" *-- "0..*" AttemptAnswer : answers
+QuizAttempt "1" *-- "0..*" ProctoringLog : proctoring_logs
+
+AttemptViewSet ..> ScoringService : delegates scoring
+ScoringService ..> Evaluation : creates
+ScoringService ..> FailedTopic : creates per failed concept
+ScoringService ..> EvaluationTelemetry : creates
+ScoringService ..> AxiomEngineClient : if failed_concepts exist
+ScoringService ..> QuizAttempt : updates adaptive_plan
+
+ProctoringViewSet ..> ProctoringLog : bulk_create
+
+@enduml

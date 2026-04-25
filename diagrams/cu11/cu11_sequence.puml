@@ -1,0 +1,70 @@
+@startuml CU11_Sequence
+!include ../_shared/global_style.iuml
+skinparam responseMessageBelowArrow true
+autonumber "<b>"
+
+title CU-11 — Dashboard analítico del curso: Diagrama de Secuencia
+
+actor Tutor as Actor
+boundary "Angular\nDashboardComponent" as Angular
+control "TeacherDashboardViewSet\n(analytics_viewset.py:86)" as ViewSet
+entity "Course\n(course_model.py:6)" as CourseModel
+entity "Evaluation\n(evaluation_model.py:5)" as EvalModel
+entity "QuizAttempt\n(attempt_model.py:5)" as AttemptModel
+entity "ProctoringLog\n(proctoring_model.py:4)" as ProcModel
+entity "LMSUser\n(user_model.py:5)" as UserModel
+entity "FailedTopic\n(failed_topic_model.py:4)" as FTModel
+database "NeonDB\nPostgreSQL" as DB
+
+Actor -> Angular : Ver dashboard del curso {course_id}
+Angular -> ViewSet : GET /api/v1/analytics/course/{course_id}/dashboard/\nAuthorization: Bearer <token>
+
+ViewSet -> ViewSet : permission_classes → [IsAuthenticated, IsTutor]
+
+alt user.role != "TUTOR"
+    ViewSet --> Angular : HTTP 403\n"Access restricted to tutors."
+else user.role == "TUTOR"
+    ViewSet -> CourseModel : Course.objects.get(pk=course_id)
+    CourseModel -> DB : SELECT * FROM course WHERE pk = {course_id}
+
+    alt Course not found
+        DB --> CourseModel : DoesNotExist
+        ViewSet --> Angular : HTTP 404\n{ "error": "not_found",\n"detail": "Course not found." }
+    else Course found
+        DB --> CourseModel : Course instance
+
+        ViewSet -> EvalModel : Evaluation.objects.filter(course=course)\n.values_list("student_id", flat=True)
+        EvalModel -> DB : SELECT DISTINCT student_id\nFROM evaluation WHERE course_id = ?
+        DB --> EvalModel : eval_student_ids set
+
+        ViewSet -> AttemptModel : QuizAttempt.objects.filter(quiz__course=course)\n.values_list("student_id", flat=True)
+        AttemptModel -> DB : SELECT DISTINCT student_id\nFROM quiz_attempt\nJOIN quiz ON quiz.id = quiz_attempt.quiz_id\nWHERE quiz.course_id = ?
+        DB --> AttemptModel : attempt_student_ids set
+
+        ViewSet -> ViewSet : enrolled_student_ids = eval_student_ids | attempt_student_ids\ntotal_enrolled_students = len(enrolled_student_ids)
+
+        ViewSet -> AttemptModel : QuizAttempt.objects.filter(\nquiz__course=course, is_submitted=True)\n.aggregate(Avg("final_score"))
+        AttemptModel -> DB : SELECT AVG(final_score)\nFROM quiz_attempt\nWHERE is_submitted = True
+        DB --> AttemptModel : avg_score
+
+        ViewSet -> ProcModel : ProctoringLog.objects.filter(\nattempt__quiz__course=course,\nevent_type__in=[TAB_SWITCHED, MULTIPLE_FACES])\n.values("event_type")\n.annotate(count=Count("id"))
+        ProcModel -> DB : SELECT event_type, COUNT(id)\nFROM proctoring_log\nWHERE event_type IN ('tab_switched', 'multiple_faces')\nGROUP BY event_type
+        DB --> ProcModel : proctoring_alerts dict
+
+        ViewSet -> UserModel : LMSUser.objects.filter(pk__in=enrolled_student_ids)\n.values("vark_dominant")\n.annotate(count=Count("id"))
+        UserModel -> DB : SELECT vark_dominant, COUNT(id)\nFROM lms_user\nWHERE pk IN (...)\nGROUP BY vark_dominant
+        DB --> UserModel : vark_distribution dict
+
+        ViewSet -> FTModel : FailedTopic.objects.filter(evaluation__course=course)\n.values("concept_id")\n.annotate(fail_count=Count("id"))\n.order_by("-fail_count")
+        FTModel -> DB : SELECT concept_id, COUNT(id) as fail_count\nFROM failed_topic\nJOIN evaluation ON ...\nGROUP BY concept_id\nORDER BY fail_count DESC
+        DB --> FTModel : all_failed_qs
+
+        ViewSet -> ViewSet : top_failed_concepts = available_topics[:3]
+
+        ViewSet --> Angular : HTTP 200\n{ course_id, course_code, course_name,\ntotal_enrolled_students, average_quiz_score,\nproctoring_alerts, vark_distribution,\ntop_failed_concepts }
+    end
+end
+
+Angular --> Actor : Renderizar dashboard con métricas
+
+@enduml

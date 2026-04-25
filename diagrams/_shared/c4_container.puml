@@ -1,0 +1,38 @@
+@startuml C4_Container
+' IMPORTANTE: NO incluir global_style.iuml en C4.
+' C4-PlantUML inyecta su propio skinparam.
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Container.puml
+LAYOUT_WITH_LEGEND()
+
+title AxiomLMS — C4 Level 2: Container Diagram
+
+Person(student, "Estudiante", "Rinde quizzes, entrega asignaciones,\nconsulta planes adaptativos.")
+Person(tutor, "Tutor", "Gestiona jerarquía académica,\ncalifica, consulta dashboards\ny grafos cognitivos.")
+
+System_Boundary(axiomLMS, "AxiomLMS") {
+    Container(angularSPA, "Angular SPA", "TypeScript, Angular", "Frontend SPA en port 4200.\nStandalone components.\nAuthInterceptor inyecta Bearer token.\nRoute guards (auth + role).")
+
+    Container(djangoAPI, "Django REST API", "Python, Django 5.1.7, DRF", "Backend API en port 8000.\n3 apps: learning, assessments, curriculum.\nSimpleJWT auth. Role-based permissions.")
+
+    Container(axiomEngine, "AxiomEngine", "Go, Fiber", "Microservicio de razonamiento en port 8080.\n6-stage pipeline.\nCircuit breaker + rate limiter.\nBAML → AWS Bedrock.")
+
+    ContainerDb(neonDB, "NeonDB PostgreSQL", "PostgreSQL", "Base de datos relacional.\nModelos de 3 apps Django.\nSoft delete en 8 modelos.")
+
+    Container(s3, "AWS S3", "Object Storage", "resources/{course_id}/{filename}\nsubmissions/{student_id}/{filename}\nPre-signed URLs (1h TTL).")
+}
+
+System_Ext(awsBedrock, "AWS Bedrock", "Amazon Nova Micro\nServicio de IA generativa.")
+
+Rel_D(student, angularSPA, "Usa", "HTTPS")
+Rel_D(tutor, angularSPA, "Usa", "HTTPS")
+
+Rel_D(angularSPA, djangoAPI, "API calls", "HTTPS / JSON\nport 8000")
+Rel_D(angularSPA, axiomEngine, "CU-12: Cognitive graph\n(direct call)", "HTTPS / JSON\nport 8080")
+
+Rel_D(djangoAPI, neonDB, "Lee/Escribe", "psycopg2 / TCP")
+Rel_D(djangoAPI, s3, "Upload/Download archivos", "boto3 / HTTPS")
+Rel_D(djangoAPI, axiomEngine, "POST /api/v1/adaptive-plan", "HTTPS / JSON")
+
+Rel_D(axiomEngine, awsBedrock, "BAML prompts", "HTTPS")
+
+@enduml

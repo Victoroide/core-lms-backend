@@ -1,0 +1,48 @@
+@startuml CU09_State
+!include ../_shared/global_style.iuml
+hide empty description
+
+title CU-09 — QuizAttempt: Diagrama de Estado
+
+[*] --> Created : QuizAttempt.objects.create()\nis_submitted=False
+
+state Created {
+    Created : entry / start_time = auto_now_add
+    Created : entry / final_score = None
+    Created : entry / adaptive_plan = None
+}
+
+Created --> Scoring : ScoringService.score_and_evaluate()\n[answers submitted]
+
+state Scoring {
+    Scoring : do / compute correct_count per concept
+    Scoring : do / set end_time = timezone.now()
+    Scoring : do / set final_score = correct_count
+    Scoring : do / set is_submitted = True
+}
+
+Scoring --> EvaluationCreated : Evaluation.objects.create()
+
+state EvaluationCreated {
+    EvaluationCreated : do / create FailedTopic per concept
+    EvaluationCreated : do / create EvaluationTelemetry
+}
+
+EvaluationCreated --> AdaptivePlanRequested : [failed_concepts exist]\nAxiomEngineClient.request_adaptive_plan()
+EvaluationCreated --> Submitted : [no failed_concepts]\nadaptive_plan = None
+
+state AdaptivePlanRequested {
+    AdaptivePlanRequested : do / POST /api/v1/adaptive-plan to Go service
+}
+
+AdaptivePlanRequested --> Submitted : [AxiomEngine OK]\nadaptive_plan = response
+AdaptivePlanRequested --> Submitted : [fallback]\nadaptive_plan = { "plan": [], "fallback": true }
+
+state Submitted {
+    Submitted : entry / save adaptive_plan to JSONB
+    Submitted : is_submitted = True
+}
+
+Submitted --> [*]
+
+@enduml

@@ -1,0 +1,59 @@
+@startuml CU11_Class
+!include ../_shared/global_style.iuml
+
+title CU-11 — Dashboard analítico del curso: Diagrama de Clases
+
+package "apps.assessments.viewsets.analytics_viewset" <<Boundary>> {
+    class TeacherDashboardViewSet <<Boundary>> {
+        + permission_classes: [IsAuthenticated, IsTutor]
+        + CRITICAL_EVENT_TYPES: list
+        --
+        + course_dashboard(request, course_id): Response
+    }
+}
+
+package "apps.learning.models" <<Entity>> {
+    class Course <<Entity>> {
+        + pk: int
+        + code: CharField
+        + name: CharField
+    }
+
+    class Evaluation <<Entity>> {
+        + student: FK → LMSUser
+        + course: FK → Course
+        + score: DecimalField
+    }
+
+    class FailedTopic <<Entity>> {
+        + evaluation: FK → Evaluation
+        + concept_id: CharField
+    }
+
+    class LMSUser <<Entity>> {
+        + vark_dominant: CharField
+    }
+}
+
+package "apps.assessments.models" <<Entity>> {
+    class QuizAttempt <<Entity>> {
+        + student: FK → LMSUser
+        + quiz: FK → Quiz
+        + final_score: DecimalField
+        + is_submitted: BooleanField
+    }
+
+    class ProctoringLog <<Entity>> {
+        + attempt: FK → QuizAttempt
+        + event_type: CharField
+    }
+}
+
+TeacherDashboardViewSet ..> Course : lookup by course_id
+TeacherDashboardViewSet ..> Evaluation : UNION student IDs\n+ COUNT enrolled
+TeacherDashboardViewSet ..> QuizAttempt : UNION student IDs\n+ Avg(final_score)
+TeacherDashboardViewSet ..> ProctoringLog : COUNT per event_type\nWHERE IN CRITICAL_EVENT_TYPES
+TeacherDashboardViewSet ..> LMSUser : COUNT grouped by vark_dominant
+TeacherDashboardViewSet ..> FailedTopic : top 3 concept_id by fail_count
+
+@enduml

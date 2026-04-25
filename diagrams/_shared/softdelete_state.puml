@@ -1,0 +1,39 @@
+@startuml SoftDelete_State
+!include ../_shared/global_style.iuml
+hide empty description
+
+title AxiomLMS — Soft Delete: State Machine
+note as N1
+    Applies to 8 models:
+    Career, Semester, Course, Module,
+    Lesson, Resource, Assignment, Submission
+end note
+
+[*] --> Active : Model.objects.create()
+
+state Active {
+    Active : is_deleted = False
+    Active : deleted_at = None
+    Active : Visible via SoftDeleteManager
+}
+
+Active --> SoftDeleted : instance.delete()\n[SoftDeleteMixin.delete()]
+
+state SoftDeleted {
+    SoftDeleted : entry / is_deleted = True
+    SoftDeleted : entry / deleted_at = timezone.now()
+    SoftDeleted : entry / save(update_fields=["is_deleted", "deleted_at"])
+    SoftDeleted : Hidden from SoftDeleteManager.get_queryset()
+    SoftDeleted : Visible via AllObjectsManager.get_queryset()
+}
+
+SoftDeleted --> HardDeleted : instance.hard_delete()\n[super().delete()]
+
+state HardDeleted {
+    HardDeleted : SQL DELETE executed
+    HardDeleted : Row removed from database
+}
+
+HardDeleted --> [*]
+
+@enduml

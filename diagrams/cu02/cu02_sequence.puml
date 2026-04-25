@@ -1,0 +1,48 @@
+@startuml CU02_Sequence
+!include ../_shared/global_style.iuml
+skinparam responseMessageBelowArrow true
+autonumber "<b>"
+
+title CU-02 — Completar onboarding VARK: Diagrama de Secuencia
+
+actor Estudiante as Actor
+boundary "Angular\nOnboardingComponent" as Angular
+control "UserViewSet\n(user_onboarding_viewset.py:87)" as ViewSet
+entity "VARKOnboardingSerializer\n(user_onboarding_viewset.py:20)" as Serializer
+entity "LMSUser\n(user_model.py:5)" as User
+database "NeonDB\nPostgreSQL" as DB
+
+Actor -> Angular : Completa cuestionario VARK
+Angular -> ViewSet : POST /api/v1/users/{id}/onboard/\n{ answers: [{category, value}, ...] }
+
+ViewSet -> ViewSet : get_object() → user
+ViewSet -> DB : SELECT * FROM lms_user WHERE pk = {id}
+DB --> ViewSet : LMSUser instance
+
+alt user.pk != request.user.pk
+    ViewSet --> Angular : HTTP 403\n{ "error": "forbidden",\n"details": "Cannot update another user's profile." }
+else user.pk == request.user.pk
+    ViewSet -> Serializer : VARKOnboardingSerializer(data=request.data)
+    Serializer -> Serializer : is_valid(raise_exception=True)
+
+    alt validation fails
+        Serializer --> ViewSet : raise ValidationError
+        ViewSet --> Angular : HTTP 400\n{ field errors }
+    else validation passes
+        ViewSet -> ViewSet : scores = defaultdict(int)\nfor answer in validated_data["answers"]:\n  scores[answer["category"]] += answer["value"]
+
+        alt scores is empty
+            ViewSet --> Angular : HTTP 400\n{ "error": "validation_error",\n"details": "No answers provided." }
+        else scores computed
+            ViewSet -> ViewSet : dominant = max(scores, key=scores.get)
+            ViewSet -> User : user.vark_dominant = dominant
+            User -> DB : UPDATE lms_user\nSET vark_dominant = ?\nWHERE pk = ?
+            DB --> User : OK
+            ViewSet --> Angular : HTTP 200\n{ student_id, vark_scores, vark_dominant }
+        end
+    end
+end
+
+Angular --> Actor : Mostrar perfil VARK dominante
+
+@enduml

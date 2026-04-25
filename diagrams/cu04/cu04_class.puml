@@ -1,0 +1,54 @@
+@startuml CU04_Class
+!include ../_shared/global_style.iuml
+
+title CU-04 — Gestionar recursos de lección: Diagrama de Clases
+
+package "apps.learning.models.resource_model" <<Entity>> {
+    class Resource <<Entity>> {
+        + lesson: FK → Lesson (CASCADE)
+        + uploaded_by: FK → LMSUser (SET_NULL)
+        + file: FileField(upload_to=resource_upload_path)
+        + resource_type: CharField [PDF | VIDEO | DOCUMENT | IMAGE | OTHER]
+        + title: CharField(max_length=255)
+        + created_at: DateTimeField(auto_now_add)
+        + objects: SoftDeleteManager
+        + all_objects: AllObjectsManager
+    }
+}
+
+package "apps.learning.services.storage_service" <<Entity>> {
+    class resource_upload_path <<Function>> {
+        + __call__(instance: Resource, filename: str): str
+        --
+        returns "resources/{instance.lesson.module.course_id}/{filename}"
+    }
+}
+
+package "apps.learning.viewsets.resource_viewset" <<Boundary>> {
+    class ResourceViewSet <<Boundary>> {
+        + queryset: Resource.objects.select_related(...)
+        + serializer_class: ResourceSerializer
+        + filterset_fields: [lesson, resource_type, is_deleted]
+        --
+        + get_permissions(): list
+        + list(request): Response
+        + retrieve(request): Response
+        + create(request): Response
+        + update(request): Response
+        + partial_update(request): Response
+        + destroy(request): Response
+    }
+}
+
+package "apps.learning.serializers.resource_serializer" <<Control>> {
+    class ResourceSerializer <<Control>> {
+        + file: FileField (serialized as S3 URL)
+    }
+}
+
+ResourceViewSet --> ResourceSerializer : serializer_class
+ResourceViewSet ..> Resource
+Resource --> resource_upload_path : upload_to
+Resource ..> "Lesson" : lesson FK
+
+@enduml

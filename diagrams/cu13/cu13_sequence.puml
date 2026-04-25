@@ -1,0 +1,103 @@
+@startuml CU13_Sequence
+!include ../_shared/global_style.iuml
+skinparam responseMessageBelowArrow true
+autonumber "<b>"
+
+title CU-13 — Generar certificado de curso aprobado: Diagrama de Secuencia
+
+actor Estudiante as Actor
+boundary "Angular\nCertificateComponent" as Angular
+control "CertificateViewSet\n(certificate_viewset.py:13)" as ViewSet
+entity "CertificateGenerator\n(certification_service.py:16)" as Generator
+entity "Evaluation\n(evaluation_model.py:5)" as EvalModel
+entity "QuizAttempt\n(attempt_model.py:5)" as AttemptModel
+entity "Certificate\n(certificate_model.py:5)" as CertModel
+entity "LMSUser\n(user_model.py:5)" as UserModel
+entity "Course\n(course_model.py:6)" as CourseModel
+database "NeonDB\nPostgreSQL" as DB
+
+Actor -> Angular : Solicitar certificado\npara course_id
+Angular -> ViewSet : POST /api/v1/certificates/generate/\n{ student_id, course_id }\nAuthorization: Bearer <token>
+
+ViewSet -> ViewSet : get_permissions()\n→ [IsAuthenticated(), IsStudent()]
+
+alt user.role != "STUDENT"
+    ViewSet --> Angular : HTTP 403\n"Access restricted to students."
+else user.role == "STUDENT"
+
+    alt student_id or course_id missing
+        ViewSet --> Angular : HTTP 400\n"student_id and course_id are required."
+    else both provided
+        ViewSet -> UserModel : LMSUser.objects.get(pk=student_id)
+        UserModel -> DB : SELECT * FROM lms_user WHERE pk = ?
+
+        alt Student not found
+            DB --> UserModel : DoesNotExist
+            ViewSet --> Angular : HTTP 400\n"Student not found."
+        else Student found
+            DB --> UserModel : LMSUser instance
+
+            ViewSet -> CourseModel : Course.objects.get(pk=course_id)
+            CourseModel -> DB : SELECT * FROM course WHERE pk = ?
+
+            alt Course not found
+                DB --> CourseModel : DoesNotExist
+                ViewSet --> Angular : HTTP 400\n"Course not found."
+            else Course found
+                DB --> CourseModel : Course instance
+
+                ViewSet -> Generator : CertificateGenerator()\n.issue_certificate(student, course)
+
+                Generator -> Generator : _verify_eligibility(student, course)
+
+                Generator -> EvalModel : Evaluation.objects.filter(\nstudent=student, course=course,\nscore__gte=60.00).exists()
+                EvalModel -> DB : SELECT EXISTS(SELECT 1 FROM evaluation\nWHERE student_id=? AND course_id=?\nAND score >= 60.00)
+                DB --> EvalModel : has_passing_evaluation
+
+                Generator -> AttemptModel : QuizAttempt.objects.filter(\nstudent=student, quiz__course=course,\nis_submitted=True,\nfinal_score__gte=60.00).exists()
+                AttemptModel -> DB : SELECT EXISTS(SELECT 1 FROM quiz_attempt\nJOIN quiz ON quiz.id = quiz_attempt.quiz_id\nWHERE student_id=? AND quiz.course_id=?\nAND is_submitted=True AND final_score >= 60.00)
+                DB --> AttemptModel : has_passing_quiz
+
+                alt NOT has_passing_evaluation AND NOT has_passing_quiz
+                    Generator --> ViewSet : raise CertificateEligibilityError
+                    ViewSet --> Angular : HTTP 403\n{ "error": "ineligible",\n"detail": "No passing evaluation or quiz attempt found\n(minimum score: 60.00)." }
+                else eligible
+                    Generator -> CertModel : Certificate.objects.filter(\nstudent=student, course=course).first()
+                    CertModel -> DB : SELECT * FROM certificate\nWHERE student_id=? AND course_id=?\nLIMIT 1
+                    
+                    alt existing certificate found (idempotent)
+                        DB --> CertModel : Certificate instance
+                        Generator --> ViewSet : existing Certificate
+                    else no existing certificate
+                        DB --> CertModel : None
+                        Generator -> Generator : issued_at = timezone.now()
+                        Generator -> Generator : _compute_hash(\nstudent.pk, course.pk,\nissued_at.isoformat())
+                        note right
+                            SHA-256 of
+                            "{student_id}:{course_id}:{issued_at_iso}"
+                        end note
+                        Generator -> CertModel : Certificate.objects.create(\nstudent, course, certificate_hash)
+                        CertModel -> DB : INSERT INTO certificate\n(student_id, course_id,\ncertificate_hash, issued_at)
+
+                        alt IntegrityError (concurrent request)
+                            DB --> CertModel : IntegrityError
+                            Generator -> CertModel : Certificate.objects.get(\nstudent=student, course=course)
+                            CertModel -> DB : SELECT * FROM certificate\nWHERE student_id=? AND course_id=?
+                            DB --> CertModel : Certificate instance
+                            Generator --> ViewSet : race-resolved Certificate
+                        else insert OK
+                            DB --> CertModel : Certificate row
+                            Generator --> ViewSet : new Certificate
+                        end
+                    end
+
+                    ViewSet --> Angular : HTTP 201\n{ certificate_hash, issued_at,\ncourse_id, student_id }
+                end
+            end
+        end
+    end
+end
+
+Angular --> Actor : Mostrar certificado con hash verificable
+
+@enduml

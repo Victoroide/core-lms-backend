@@ -1,0 +1,51 @@
+@startuml CU06_Class
+!include ../_shared/global_style.iuml
+
+title CU-06 — Entregar asignación: Diagrama de Clases
+
+package "apps.curriculum.models.submission_model" <<Entity>> {
+    class Submission <<Entity>> {
+        + assignment: FK → Assignment (CASCADE)
+        + student: FK → LMSUser (CASCADE)
+        + file: FileField(upload_to=submission_upload_path)
+        + submitted_at: DateTimeField(auto_now_add)
+        + grade: DecimalField(null)
+        + graded_at: DateTimeField(null)
+        + objects: SoftDeleteManager
+        + all_objects: AllObjectsManager
+        --
+        <<unique_together>> (assignment, student)
+    }
+}
+
+package "apps.curriculum.services.storage_service" <<Entity>> {
+    class submission_upload_path <<Function>> {
+        + __call__(instance: Submission, filename: str): str
+        --
+        returns "submissions/{instance.student_id}/{filename}"
+    }
+}
+
+package "apps.curriculum.viewsets.submission_viewset" <<Boundary>> {
+    class SubmissionViewSet <<Boundary>> {
+        + serializer_class: SubmissionSerializer
+        + filterset_fields: [assignment, is_deleted]
+        --
+        + get_queryset(): QuerySet
+        + get_permissions(): list
+        + create(request): Response
+    }
+}
+
+package "apps.curriculum.serializers.submission_serializer" <<Control>> {
+    class SubmissionSerializer <<Control>> {
+    }
+}
+
+SubmissionViewSet --> SubmissionSerializer : serializer_class
+SubmissionViewSet ..> Submission
+Submission --> submission_upload_path : upload_to
+Submission ..> "Assignment" : assignment FK
+Submission ..> "LMSUser" : student FK
+
+@enduml

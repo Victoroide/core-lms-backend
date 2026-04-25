@@ -1,0 +1,41 @@
+@startuml CU03_Sequence_SoftDelete
+!include ../_shared/global_style.iuml
+skinparam responseMessageBelowArrow true
+autonumber "<b>"
+
+title CU-03 — Gestionar jerarquía académica: Soft Delete
+
+actor Tutor as Actor
+boundary "Angular\nAdminComponent" as Angular
+control "CareerViewSet\n(career_viewset.py:139)" as ViewSet
+entity "Career\n(career_model.py:6)" as Model
+entity "SoftDeleteMixin\n(mixins.py:6)" as Mixin
+database "NeonDB\nPostgreSQL" as DB
+
+Actor -> Angular : Eliminar carrera {id}
+Angular -> ViewSet : DELETE /api/v1/careers/{id}/\nAuthorization: Bearer <token>
+
+ViewSet -> ViewSet : get_permissions() → [IsTutor()]
+
+alt user.role != "TUTOR"
+    ViewSet --> Angular : HTTP 403\n"Access restricted to tutors."
+else user.role == "TUTOR"
+    ViewSet -> Model : get_object() → instance
+    Model -> DB : SELECT * FROM career WHERE pk = {id}\nAND is_deleted = False
+    DB --> Model : Career instance
+
+    ViewSet -> Mixin : instance.delete()
+    note right
+        SoftDeleteMixin.delete():
+        self.is_deleted = True
+        self.deleted_at = timezone.now()
+        self.save(update_fields=["is_deleted", "deleted_at"])
+    end note
+    Mixin -> DB : UPDATE career\nSET is_deleted=True, deleted_at=NOW()\nWHERE pk = {id}
+    DB --> Mixin : OK
+    ViewSet --> Angular : HTTP 204 No Content
+end
+
+Angular --> Actor : Confirmar eliminación
+
+@enduml

@@ -1,0 +1,63 @@
+@startuml CU07_Activity
+!include ../_shared/global_style.iuml
+
+title CU-07 — Gestionar entregas y calificar: Diagrama de Actividad
+
+|Tutor|
+start
+:Navegar al panel de entregas;
+:GET /api/v1/submissions/;
+
+|SubmissionViewSet|
+:get_queryset() → Submission.objects.all()\n(tutor ve todas las entregas);
+
+|NeonDB PostgreSQL|
+:SELECT * FROM submission\nWHERE is_deleted = False;
+
+|SubmissionViewSet|
+:Retornar HTTP 200\nlista de submissions;
+
+|Tutor|
+:Seleccionar submission {id};
+:Ingresar calificación numérica;
+:PATCH /api/v1/submissions/{id}/grade/\n{ "grade": <valor> };
+
+|SubmissionViewSet|
+:IsTutor.has_permission(request, view);
+
+if (user.role == "TUTOR"?) then (sí)
+else (no)
+    :Retornar HTTP 403;
+    stop
+endif
+
+:get_object() → submission;
+
+if (grade is None?) then (sí)
+    :Retornar HTTP 400\n"grade is required.";
+    stop
+else (no)
+endif
+
+:Decimal(str(grade_value));
+
+if (Conversión válida?) then (sí)
+    :submission.grade = grade_decimal;
+    :submission.graded_at = timezone.now();
+    :submission.save(update_fields=["grade", "graded_at"]);
+
+    |NeonDB PostgreSQL|
+    :UPDATE submission\nSET grade, graded_at;
+
+    |SubmissionViewSet|
+    :Retornar HTTP 200\nSubmissionSerializer(submission);
+else (no)
+    :Retornar HTTP 400\n"Invalid grade value.";
+    stop
+endif
+
+|Tutor|
+:Visualizar confirmación de calificación;
+stop
+
+@enduml

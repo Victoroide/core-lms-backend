@@ -1,0 +1,33 @@
+@startuml CU04_Sequence_Retrieve
+!include ../_shared/global_style.iuml
+skinparam responseMessageBelowArrow true
+autonumber "<b>"
+
+title CU-04 — Gestionar recursos de lección: Retrieve con S3 URL
+
+actor Estudiante as Actor
+boundary "Angular\nLessonComponent" as Angular
+control "ResourceViewSet\n(resource_viewset.py:62)" as ViewSet
+entity "ResourceSerializer\n(resource_serializer.py)" as Serializer
+entity "Resource\n(resource_model.py:8)" as Model
+database "NeonDB\nPostgreSQL" as DB
+
+Actor -> Angular : Ver recurso de lección
+Angular -> ViewSet : GET /api/v1/resources/{id}/\nAuthorization: Bearer <token>
+
+ViewSet -> ViewSet : get_permissions() → [IsAuthenticated()]
+ViewSet -> Model : get_object()
+Model -> DB : SELECT * FROM resource\nWHERE pk = {id} AND is_deleted = False
+DB --> Model : Resource instance
+
+ViewSet -> Serializer : ResourceSerializer(instance)
+note right
+    file field serialized as
+    S3 URL (public-read or
+    pre-signed depending on config)
+end note
+Serializer --> ViewSet : { id, lesson, file: "<S3 URL>",\nresource_type, title, created_at }
+ViewSet --> Angular : HTTP 200
+Angular --> Actor : Renderizar recurso / enlace de descarga
+
+@enduml

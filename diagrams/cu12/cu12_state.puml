@@ -1,0 +1,37 @@
+@startuml CU12_State
+!include ../_shared/global_style.iuml
+hide empty description
+
+title CU-12 — Cognitive Graph Node States
+
+[*] --> Mastered : concept passed by student\nin relevant course area
+
+state Mastered {
+    Mastered : Node rendered as "mastered"
+    Mastered : Student demonstrated competency
+}
+
+[*] --> Failed : concept student did NOT pass\n(FailedTopic exists)
+
+state Failed {
+    Failed : Node rendered as "failed"
+    Failed : Triggers adaptive plan
+}
+
+[*] --> Learning : prerequisite of a failed concept
+
+state Learning {
+    Learning : Node rendered as "learning"
+    Learning : Student must review prerequisite
+}
+
+Mastered --> [*]
+Failed --> [*]
+Learning --> [*]
+
+note right of Failed
+    Classification source:
+    graph/memory.go:188-235
+end note
+
+@enduml

@@ -1,0 +1,46 @@
+@startuml CU04_Sequence_Upload
+!include ../_shared/global_style.iuml
+skinparam responseMessageBelowArrow true
+autonumber "<b>"
+
+title CU-04 — Gestionar recursos de lección: Upload
+
+actor Tutor as Actor
+boundary "Angular\nResourceComponent" as Angular
+control "ResourceViewSet\n(resource_viewset.py:11)" as ViewSet
+entity "ResourceSerializer\n(resource_serializer.py)" as Serializer
+entity "Resource\n(resource_model.py:8)" as Model
+entity "resource_upload_path\n(storage_service.py:4)" as StorageFunc
+database "AWS S3" as S3
+database "NeonDB\nPostgreSQL" as DB
+
+Actor -> Angular : Seleccionar archivo\n+ lesson, resource_type, title
+Angular -> ViewSet : POST /api/v1/resources/\n(multipart/form-data)\nAuthorization: Bearer <token>
+
+ViewSet -> ViewSet : get_permissions() → [IsTutor()]
+
+alt user.role != "TUTOR"
+    ViewSet --> Angular : HTTP 403\n"Access restricted to tutors."
+else user.role == "TUTOR"
+    ViewSet -> Serializer : ResourceSerializer(data=request.data)
+    Serializer -> Serializer : is_valid(raise_exception=True)
+
+    alt validation fails
+        Serializer --> ViewSet : raise ValidationError
+        ViewSet --> Angular : HTTP 400\n{ field errors }
+    else validation passes
+        Serializer -> Model : Resource(**validated_data)
+        Model -> StorageFunc : resource_upload_path(instance, filename)
+        StorageFunc --> Model : "resources/{course_id}/{filename}"
+        Model -> S3 : PUT object at\nresources/{course_id}/{filename}
+        S3 --> Model : OK
+        Model -> DB : INSERT INTO resource\n(lesson_id, uploaded_by_id, file,\nresource_type, title, created_at,\nis_deleted, deleted_at)
+        DB --> Model : Resource row
+        Serializer --> ViewSet : serialized data
+        ViewSet --> Angular : HTTP 201\n{ id, lesson, file (S3 URL), resource_type, title }
+    end
+end
+
+Angular --> Actor : Confirmar recurso subido
+
+@enduml

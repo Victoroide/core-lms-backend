@@ -1,0 +1,126 @@
+@startuml CU03_Class
+!include ../_shared/global_style.iuml
+
+title CU-03 — Gestionar jerarquía académica: Diagrama de Clases
+
+package "core_lms.mixins" {
+    class SoftDeleteMixin <<Entity>> {
+        + is_deleted: BooleanField
+        + deleted_at: DateTimeField
+        --
+        + delete(using, keep_parents): None
+        + hard_delete(using, keep_parents): None
+    }
+
+    class SoftDeleteManager <<Control>> {
+        --
+        + get_queryset(): QuerySet
+    }
+
+    class AllObjectsManager <<Control>> {
+        --
+        + get_queryset(): QuerySet
+    }
+}
+
+package "apps.learning.models" <<Entity>> {
+    class Career <<Entity>> {
+        + name: CharField(max_length=200)
+        + code: CharField(max_length=20, unique)
+        + description: TextField
+        + created_at: DateTimeField(auto_now_add)
+        + objects: SoftDeleteManager
+        + all_objects: AllObjectsManager
+    }
+
+    class Semester <<Entity>> {
+        + career: FK → Career
+        + name: CharField(max_length=100)
+        + number: PositiveIntegerField
+        + year: PositiveIntegerField
+        + period: CharField [I | II | SUMMER]
+        + created_at: DateTimeField(auto_now_add)
+        + objects: SoftDeleteManager
+        + all_objects: AllObjectsManager
+        --
+        <<unique_together>> (career, number, year)
+    }
+
+    class Course <<Entity>> {
+        + semester: FK → Semester (SET_NULL, null)
+        + name: CharField(max_length=200)
+        + code: CharField(max_length=20, unique)
+        + description: TextField
+        + created_at: DateTimeField(auto_now_add)
+        + objects: SoftDeleteManager
+        + all_objects: AllObjectsManager
+    }
+
+    class Module <<Entity>> {
+        + course: FK → Course (CASCADE)
+        + title: CharField(max_length=255)
+        + description: TextField
+        + order: PositiveIntegerField
+        + objects: SoftDeleteManager
+        + all_objects: AllObjectsManager
+    }
+
+    class Lesson <<Entity>> {
+        + module: FK → Module (CASCADE)
+        + title: CharField(max_length=255)
+        + content: TextField
+        + order: PositiveIntegerField
+        + objects: SoftDeleteManager
+        + all_objects: AllObjectsManager
+    }
+}
+
+package "apps.learning.viewsets" <<Boundary>> {
+    class CareerViewSet <<Boundary>> {
+        + queryset: Career.objects.all()
+        --
+        + get_serializer_class(): type
+        + get_permissions(): list
+        + list(request): Response
+        + retrieve(request): Response
+        + create(request): Response
+        + update(request): Response
+        + partial_update(request): Response
+        + destroy(request): Response
+    }
+
+    class SemesterViewSet <<Boundary>> {
+        + queryset: Semester.objects.all()
+    }
+
+    class CourseViewSet <<Boundary>> {
+        + queryset: Course.objects.all()
+    }
+
+    class ModuleViewSet <<Boundary>> {
+        + queryset: Module.objects.all()
+    }
+
+    class LessonViewSet <<Boundary>> {
+        + queryset: Lesson.objects.all()
+    }
+}
+
+Career <|-- SoftDeleteMixin
+Semester <|-- SoftDeleteMixin
+Course <|-- SoftDeleteMixin
+Module <|-- SoftDeleteMixin
+Lesson <|-- SoftDeleteMixin
+
+Career "1" *-- "0..*" Semester : semesters
+Semester "1" o-- "0..*" Course : courses
+Course "1" *-- "0..*" Module : modules
+Module "1" *-- "0..*" Lesson : lessons
+
+CareerViewSet ..> Career
+SemesterViewSet ..> Semester
+CourseViewSet ..> Course
+ModuleViewSet ..> Module
+LessonViewSet ..> Lesson
+
+@enduml

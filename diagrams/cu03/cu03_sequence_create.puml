@@ -1,0 +1,42 @@
+@startuml CU03_Sequence_Create
+!include ../_shared/global_style.iuml
+skinparam responseMessageBelowArrow true
+autonumber "<b>"
+
+title CU-03 — Gestionar jerarquía académica: Crear entidad (ejemplo Career)
+
+actor Tutor as Actor
+boundary "Angular\nAdminComponent" as Angular
+control "CareerViewSet\n(career_viewset.py:11)" as ViewSet
+entity "CareerSerializer\n(career_serializer.py)" as Serializer
+entity "Career\n(career_model.py:6)" as Model
+database "NeonDB\nPostgreSQL" as DB
+
+Actor -> Angular : Crear nueva carrera\n{ name, code, description }
+Angular -> ViewSet : POST /api/v1/careers/\nAuthorization: Bearer <token>
+
+ViewSet -> ViewSet : get_permissions()\n→ [IsTutor()]
+ViewSet -> ViewSet : IsTutor.has_permission(request, view)
+
+alt user.role != "TUTOR"
+    ViewSet --> Angular : HTTP 403\n"Access restricted to tutors."
+else user.role == "TUTOR"
+    ViewSet -> Serializer : CareerSerializer(data=request.data)
+    Serializer -> Serializer : is_valid(raise_exception=True)
+
+    alt validation fails (e.g. duplicate code)
+        Serializer --> ViewSet : raise ValidationError
+        ViewSet --> Angular : HTTP 400\n{ field errors }
+    else validation passes
+        Serializer -> Model : Career.objects.create(**validated_data)
+        Model -> DB : INSERT INTO career\n(name, code, description, created_at,\nis_deleted, deleted_at)
+        DB --> Model : Career row
+        Model --> Serializer : Career instance
+        Serializer --> ViewSet : serialized data
+        ViewSet --> Angular : HTTP 201\n{ id, name, code, description, created_at }
+    end
+end
+
+Angular --> Actor : Mostrar carrera creada
+
+@enduml

@@ -1,0 +1,76 @@
+@startuml CU13_Class
+!include ../_shared/global_style.iuml
+
+title CU-13 — Generar certificado de curso aprobado: Diagrama de Clases
+
+package "apps.learning.viewsets.certificate_viewset" <<Boundary>> {
+    class CertificateViewSet <<Boundary>> {
+        --
+        + get_permissions(): list
+        + generate(request): Response
+        + verify(request, hash): Response
+    }
+}
+
+package "apps.learning.services.certification_service" <<Control>> {
+    class CertificateGenerator <<Control>> {
+        + PASSING_SCORE: Decimal = 60.00
+        --
+        + {static} _compute_hash(student_id, course_id, issued_at_iso): str
+        + _verify_eligibility(student, course): None
+        + issue_certificate(student, course): Certificate
+    }
+}
+
+package "apps.learning.services.exceptions" {
+    class CertificateEligibilityError {
+        + student_id: int
+        + course_id: int
+        + reason: str
+    }
+}
+
+package "apps.learning.models" <<Entity>> {
+    class Certificate <<Entity>> {
+        + student: FK → LMSUser (CASCADE)
+        + course: FK → Course (CASCADE)
+        + issued_at: DateTimeField(auto_now_add)
+        + certificate_hash: CharField(max_length=64, unique)
+        --
+        <<unique_together>> (student, course)
+    }
+
+    class Evaluation <<Entity>> {
+        + student: FK → LMSUser
+        + course: FK → Course
+        + score: DecimalField
+    }
+
+    class LMSUser <<Entity>> {
+        + pk: int
+    }
+
+    class Course <<Entity>> {
+        + pk: int
+        + code: CharField
+    }
+}
+
+package "apps.assessments.models" <<Entity>> {
+    class QuizAttempt <<Entity>> {
+        + student: FK → LMSUser
+        + quiz: FK → Quiz
+        + is_submitted: BooleanField
+        + final_score: DecimalField
+    }
+}
+
+CertificateViewSet ..> CertificateGenerator : delegates
+CertificateGenerator ..> Certificate : creates / queries
+CertificateGenerator ..> Evaluation : _verify_eligibility\nscore >= PASSING_SCORE
+CertificateGenerator ..> QuizAttempt : _verify_eligibility\nfinal_score >= PASSING_SCORE
+CertificateGenerator ..> CertificateEligibilityError : raises on ineligibility
+Certificate ..> LMSUser : student FK
+Certificate ..> Course : course FK
+
+@enduml

@@ -1,0 +1,85 @@
+@startuml CU13_Activity
+!include ../_shared/global_style.iuml
+
+title CU-13 — Generar certificado: Diagrama de Actividad
+
+|Estudiante|
+start
+:Solicitar certificado\npara curso {course_id};
+:POST /api/v1/certificates/generate/\n{ student_id, course_id };
+
+|CertificateViewSet|
+:IsStudent.has_permission(request, view);
+
+if (user.role == "STUDENT"?) then (sí)
+else (no)
+    :HTTP 403;
+    stop
+endif
+
+if (student_id y course_id presentes?) then (sí)
+else (no)
+    :HTTP 400\n"student_id and course_id are required.";
+    stop
+endif
+
+:LMSUser.objects.get(pk=student_id);
+
+if (Student exists?) then (sí)
+else (no)
+    :HTTP 400 "Student not found.";
+    stop
+endif
+
+:Course.objects.get(pk=course_id);
+
+if (Course exists?) then (sí)
+else (no)
+    :HTTP 400 "Course not found.";
+    stop
+endif
+
+|CertificateGenerator|
+:_verify_eligibility(student, course);
+
+|NeonDB PostgreSQL|
+:Evaluation.objects.filter(\nscore >= 60.00).exists();
+:QuizAttempt.objects.filter(\nfinal_score >= 60.00,\nis_submitted=True).exists();
+
+|CertificateGenerator|
+if (has_passing_evaluation OR has_passing_quiz?) then (sí)
+else (no)
+    :raise CertificateEligibilityError;
+    |CertificateViewSet|
+    :HTTP 403\n"ineligible";
+    stop
+endif
+
+:Certificate.objects.filter(\nstudent, course).first();
+
+if (Certificate ya existe?) then (sí)
+    :Retornar Certificate existente\n(idempotente);
+else (no)
+    :issued_at = timezone.now();
+    :certificate_hash = SHA-256(\n"{student_id}:{course_id}:{issued_at}");
+    :Certificate.objects.create(\nstudent, course, certificate_hash);
+
+    if (IntegrityError?) then (sí)
+        :Certificate.objects.get(\nstudent, course);
+        note right
+            Race condition resolved:
+            concurrent request created
+            the certificate first.
+        end note
+    else (no)
+    endif
+endif
+
+|CertificateViewSet|
+:HTTP 201\n{ certificate_hash, issued_at,\ncourse_id, student_id };
+
+|Estudiante|
+:Visualizar certificado\ncon hash SHA-256;
+stop
+
+@enduml

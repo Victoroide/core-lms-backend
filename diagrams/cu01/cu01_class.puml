@@ -1,0 +1,61 @@
+@startuml CU01_Class
+!include ../_shared/global_style.iuml
+
+title CU-01 — Gestionar sesión: Diagrama de Clases
+
+package "apps.learning.viewsets.auth_viewset" <<Boundary>> {
+    class RateLimitedTokenView <<Boundary>> {
+        + serializer_class: AxiomTokenObtainPairSerializer
+        --
+        + post(request, *args, **kwargs): Response
+    }
+
+    class TaggedTokenRefreshView <<Boundary>> {
+        --
+        + post(request, *args, **kwargs): Response
+    }
+}
+
+package "apps.learning.serializers.token_serializer" <<Control>> {
+    class AxiomTokenObtainPairSerializer <<Control>> {
+        --
+        + {static} get_token(user: LMSUser): Token
+        + validate(attrs: dict): dict
+    }
+}
+
+package "rest_framework_simplejwt.views" {
+    class TokenObtainPairView {
+        + permission_classes: [AllowAny]
+    }
+    class TokenRefreshView {
+        + permission_classes: [AllowAny]
+    }
+}
+
+package "rest_framework_simplejwt.serializers" {
+    class TokenObtainPairSerializer {
+        + {static} get_token(user): Token
+        + validate(attrs: dict): dict
+    }
+}
+
+package "apps.learning.models.user_model" <<Entity>> {
+    class LMSUser <<Entity>> {
+        + role: CharField [STUDENT | TUTOR]
+        + vark_dominant: CharField
+        + username: CharField
+        + email: EmailField
+        --
+        + get_full_name(): str
+        + __str__(): str
+    }
+}
+
+RateLimitedTokenView --|> TokenObtainPairView
+TaggedTokenRefreshView --|> TokenRefreshView
+AxiomTokenObtainPairSerializer --|> TokenObtainPairSerializer
+RateLimitedTokenView --> AxiomTokenObtainPairSerializer : serializer_class
+AxiomTokenObtainPairSerializer ..> LMSUser : reads role,\nvark_dominant
+
+@enduml

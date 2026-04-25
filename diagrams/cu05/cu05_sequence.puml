@@ -1,0 +1,62 @@
+@startuml CU05_Sequence
+!include ../_shared/global_style.iuml
+skinparam responseMessageBelowArrow true
+autonumber "<b>"
+
+title CU-05 — Gestionar asignaciones: CRUD
+
+actor Tutor as Actor
+boundary "Angular\nAssignmentComponent" as Angular
+control "AssignmentViewSet\n(assignment_viewset.py:11)" as ViewSet
+entity "AssignmentSerializer\n(assignment_serializer.py)" as Serializer
+entity "Assignment\n(assignment_model.py:7)" as Model
+database "NeonDB\nPostgreSQL" as DB
+
+== Crear asignación ==
+
+Actor -> Angular : Nueva asignación\n{ lesson, title, description, due_date, max_score }
+Angular -> ViewSet : POST /api/v1/assignments/\nAuthorization: Bearer <token>
+
+ViewSet -> ViewSet : get_permissions() → [IsTutor()]
+
+alt user.role != "TUTOR"
+    ViewSet --> Angular : HTTP 403\n"Access restricted to tutors."
+else user.role == "TUTOR"
+    ViewSet -> Serializer : AssignmentSerializer(data=request.data)
+    Serializer -> Serializer : is_valid(raise_exception=True)
+    Serializer -> Model : Assignment.objects.create(**validated_data)
+    Model -> DB : INSERT INTO assignment\n(lesson_id, created_by_id, title,\ndescription, due_date, max_score,\ncreated_at, is_deleted, deleted_at)
+    DB --> Model : Assignment row
+    Model --> Serializer : Assignment instance
+    Serializer --> ViewSet : serialized data
+    ViewSet --> Angular : HTTP 201\n{ id, lesson, title, description, due_date, max_score }
+end
+
+== Listar asignaciones (Estudiante o Tutor) ==
+
+Angular -> ViewSet : GET /api/v1/assignments/\nAuthorization: Bearer <token>
+ViewSet -> ViewSet : get_permissions() → [IsAuthenticated()]
+ViewSet -> Model : Assignment.objects.all()
+Model -> DB : SELECT * FROM assignment\nWHERE is_deleted = False
+DB --> Model : QuerySet
+ViewSet --> Angular : HTTP 200\n[{ id, lesson, title, ... }, ...]
+
+== Soft Delete ==
+
+Actor -> Angular : Eliminar asignación {id}
+Angular -> ViewSet : DELETE /api/v1/assignments/{id}/\nAuthorization: Bearer <token>
+ViewSet -> ViewSet : get_permissions() → [IsTutor()]
+ViewSet -> Model : get_object() → instance
+Model -> DB : SELECT FROM assignment WHERE pk={id}
+DB --> Model : Assignment instance
+ViewSet -> Model : instance.delete()
+note right
+    SoftDeleteMixin.delete():
+    is_deleted = True
+    deleted_at = timezone.now()
+end note
+Model -> DB : UPDATE assignment\nSET is_deleted=True, deleted_at=NOW()
+DB --> Model : OK
+ViewSet --> Angular : HTTP 204 No Content
+
+@enduml

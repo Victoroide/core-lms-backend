@@ -68,13 +68,32 @@ Ports:
   (`core_lms.exception_handler.custom_exception_handler`) replaces
   unhandled 500 HTML pages with a JSON `{"detail": ...}` envelope
   (`core_lms/settings.py:127`).
-- Responsibilities: user account management; full CRUD over the academic
-  ontology; quiz scoring via `ScoringService`
-  (`apps/assessments/services/scoring_service.py:14`); synchronous plan
-  generation via `AxiomEngineClient`
-  (`apps/learning/services/axiom_service.py:14`); certificate issuance with
-  SHA-256 hashing (`apps/learning/services/certification_service.py:28-40`);
-  S3 uploads and pre-signed URL rendering.
+- Responsibilities by app:
+  - **`apps.learning`** — `LMSUser` and JWT auth viewsets
+    (`viewsets/auth_viewset.py`, `viewsets/user_onboarding_viewset.py`),
+    the academic ontology models `Career`, `Semester`, `Course`, `Module`,
+    `Lesson`, `Resource` and their viewsets/serializers, plus
+    `Evaluation`, `FailedTopic`, `EvaluationTelemetry`, `Certificate`.
+    Owns the synchronous Go integration via `AxiomEngineClient`
+    (`apps/learning/services/axiom_service.py:14`), certificate issuance
+    via `CertificateGenerator`
+    (`apps/learning/services/certification_service.py:16`), and the S3
+    upload-path helper `resource_upload_path`
+    (`apps/learning/services/storage_service.py:4-14`).
+  - **`apps.assessments`** — `Quiz`, `Question`, `AnswerChoice`,
+    `QuizAttempt`, `AttemptAnswer`, `ProctoringLog`. Owns
+    `ScoringService` (`apps/assessments/services/scoring_service.py:14`),
+    which is the only caller of `AxiomEngineClient` from the quiz path,
+    and the analytics dashboard `TeacherDashboardViewSet`
+    (`apps/assessments/viewsets/analytics_viewset.py:86-233`).
+  - **`apps.curriculum`** — only `Assignment` and `Submission`, with the
+    upload-path helper `submission_upload_path`
+    (`apps/curriculum/services/storage_service.py:4-14`). The academic
+    ontology (Career/Semester/Course/Module/Lesson/Resource) does **not**
+    live in this app.
+- File storage uses S3 with `querystring_auth=False` — `Resource.file` and
+  `Submission.file` are exposed as direct public URLs via the bucket policy
+  (no per-object ACL, no pre-signed query string); see § 2.3.
 
 ### 2.2 AxiomEngine Go microservice
 
@@ -206,7 +225,7 @@ Configured at `reasoning.go:62-78`:
 | Aspect | Value | Source |
 |--------|-------|--------|
 | Caller | `AxiomEngineClient` | `apps/learning/services/axiom_service.py:14` |
-| Invoked from | `ScoringService.score_and_evaluate` (UC-01) and `EvaluationViewSet.create` (UC-02) | `apps/assessments/services/scoring_service.py:88-96`; `apps/learning/viewsets/evaluation_viewset.py:60-63` |
+| Invoked from | `ScoringService.score_and_evaluate` (quiz-attempt path, CU-09) and `EvaluationViewSet.create` (evaluation-CRUD path) | `apps/assessments/services/scoring_service.py:88-96`; `apps/learning/viewsets/evaluation_viewset.py:60-63` |
 | Method | `POST` | `axiom_service.py:90` |
 | URL | `{AXIOM_ENGINE_URL}/api/v1/adaptive-plan` | `axiom_service.py:31, 80`; `core_lms/settings.py:157` |
 | Content-Type | `application/json` | `axiom_service.py:94` |
@@ -281,8 +300,8 @@ Go `PlanResponse`
 Django does not reshape the response body. `AxiomEngineClient` returns
 `response.json()` verbatim
 (`apps/learning/services/axiom_service.py:120-126`), which the callers
-persist directly into `QuizAttempt.adaptive_plan` (UC-01) or
-`response_data["adaptive_plan"]` (UC-02).
+persist directly into `QuizAttempt.adaptive_plan` (quiz-attempt path,
+CU-09) or `response_data["adaptive_plan"]` (evaluation-CRUD path).
 
 #### Adaptive-plan envelope (union of success and fallback)
 

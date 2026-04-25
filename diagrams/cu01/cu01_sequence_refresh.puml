@@ -1,0 +1,27 @@
+@startuml CU01_Sequence_Refresh
+!include ../_shared/global_style.iuml
+skinparam responseMessageBelowArrow true
+autonumber "<b>"
+
+title CU-01 — Gestionar sesión: Refresh JWT
+
+actor "Estudiante / Tutor" as Actor
+boundary "Angular\nAuthInterceptor" as Interceptor
+control "TaggedTokenRefreshView\n(auth_viewset.py:82)" as RefreshView
+database "NeonDB\nPostgreSQL" as DB
+
+Actor -> Interceptor : (access token expired)
+Interceptor -> RefreshView : POST /api/v1/auth/token/refresh/\n{ refresh }
+
+RefreshView -> DB : Validate refresh token\n(token_blacklist check)
+DB --> RefreshView : token status
+
+alt valid refresh token
+    RefreshView --> Interceptor : HTTP 200\n{ access, refresh }
+    Interceptor --> Actor : Retry original request\nwith new access token
+else invalid or blacklisted refresh token
+    RefreshView --> Interceptor : HTTP 401\n{ "detail": "Token is invalid or expired" }
+    Interceptor --> Actor : Redirect to login
+end
+
+@enduml

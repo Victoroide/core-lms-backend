@@ -1,0 +1,120 @@
+@startuml Package_Django
+!include ../_shared/global_style.iuml
+
+title AxiomLMS — Package Diagram: Django Apps
+
+package "core_lms" {
+    package "mixins" {
+        [SoftDeleteMixin]
+        [SoftDeleteManager]
+        [AllObjectsManager]
+    }
+    package "urls" {
+        [urlpatterns]
+    }
+}
+
+package "apps.learning" {
+    package "models" as LM {
+        [LMSUser]
+        [Career]
+        [Semester]
+        [Course]
+        [Module]
+        [Lesson]
+        [Resource]
+        [Evaluation]
+        [FailedTopic]
+        [EvaluationTelemetry]
+        [Certificate]
+    }
+    package "viewsets" as LV {
+        [RateLimitedTokenView]
+        [TaggedTokenRefreshView]
+        [UserViewSet]
+        [CareerViewSet]
+        [SemesterViewSet]
+        [CourseViewSet]
+        [ModuleViewSet]
+        [LessonViewSet]
+        [ResourceViewSet]
+        [EvaluationViewSet]
+        [CertificateViewSet]
+    }
+    package "services" as LS {
+        [AxiomEngineClient]
+        [CertificateGenerator]
+        [resource_upload_path]
+    }
+    package "serializers" as LSer {
+        [AxiomTokenObtainPairSerializer]
+        [CareerSerializer]
+        [CourseSerializer]
+        [ResourceSerializer]
+        [EvaluationSerializer]
+    }
+    package "permissions" as LP {
+        [IsStudent]
+        [IsTutor]
+    }
+}
+
+package "apps.assessments" {
+    package "models" as AM {
+        [Quiz]
+        [Question]
+        [AnswerChoice]
+        [QuizAttempt]
+        [AttemptAnswer]
+        [ProctoringLog]
+    }
+    package "viewsets" as AV {
+        [QuizViewSet]
+        [AttemptViewSet]
+        [ProctoringViewSet]
+        [TeacherDashboardViewSet]
+    }
+    package "services" as AS {
+        [ScoringService]
+    }
+    package "serializers" as ASer {
+        [QuizDetailSerializer]
+        [AttemptSubmitSerializer]
+        [AttemptResultSerializer]
+        [ProctoringBulkSerializer]
+    }
+}
+
+package "apps.curriculum" {
+    package "models" as CM {
+        [Assignment]
+        [Submission]
+    }
+    package "viewsets" as CV {
+        [AssignmentViewSet]
+        [SubmissionViewSet]
+    }
+    package "services" as CS {
+        [submission_upload_path]
+    }
+    package "serializers" as CSer {
+        [AssignmentSerializer]
+        [SubmissionSerializer]
+    }
+}
+
+' Cross-app dependencies
+AV -down-> LM : uses LMSUser, Course
+AV -right-> AS : ScoringService
+AS -down-> LS : AxiomEngineClient
+AS -down-> LM : Evaluation, FailedTopic,\nEvaluationTelemetry
+CV -down-> LM : uses Lesson
+LV -down-> LP : IsStudent, IsTutor
+AV -down-> LP : IsStudent, IsTutor
+CV -down-> LP : IsStudent, IsTutor
+
+' Soft delete
+LM -up-> "core_lms".mixins : Career, Semester, Course,\nModule, Lesson, Resource
+CM -up-> "core_lms".mixins : Assignment, Submission
+
+@enduml

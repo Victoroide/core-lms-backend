@@ -1,0 +1,55 @@
+@startuml C4_Component_Django
+' IMPORTANTE: NO incluir global_style.iuml en C4.
+' C4-PlantUML inyecta su propio skinparam.
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Component.puml
+LAYOUT_WITH_LEGEND()
+
+title AxiomLMS — C4 Level 3: Django REST API Components
+
+Container_Boundary(djangoAPI, "Django REST API (port 8000)") {
+
+    Component(authViewset, "RateLimitedTokenView\nTaggedTokenRefreshView", "auth_viewset.py", "JWT login + refresh.\nRate limit: 10/min/IP.")
+
+    Component(userViewset, "UserViewSet", "user_onboarding_viewset.py", "VARK onboarding.\nPOST /users/{id}/onboard/")
+
+    Component(careerViewset, "CareerViewSet", "career_viewset.py", "CRUD careers.\nIsTutor for writes.")
+    Component(semesterViewset, "SemesterViewSet", "semester_viewset.py", "CRUD semesters.")
+    Component(courseViewset, "CourseViewSet", "course_viewset.py", "CRUD courses.")
+    Component(moduleViewset, "ModuleViewSet", "module_viewset.py", "CRUD modules.")
+    Component(lessonViewset, "LessonViewSet", "lesson_viewset.py", "CRUD lessons.")
+    Component(resourceViewset, "ResourceViewSet", "resource_viewset.py", "CRUD resources.\nS3 upload.")
+
+    Component(assignmentViewset, "AssignmentViewSet", "assignment_viewset.py", "CRUD assignments.\nIsTutor for writes.")
+    Component(submissionViewset, "SubmissionViewSet", "submission_viewset.py", "Student submissions.\nTutor grading.\nPATCH grade/.")
+
+    Component(quizViewset, "QuizViewSet", "quiz_viewset.py", "List/retrieve quizzes.\nAllowAny for reads.")
+    Component(attemptViewset, "AttemptViewSet", "attempt_viewset.py", "Quiz submission.\nScoring pipeline.\nIsStudent.")
+    Component(proctoringViewset, "ProctoringViewSet", "proctoring_viewset.py", "Proctoring telemetry.\nBulk create. IsStudent.")
+    Component(analyticsViewset, "TeacherDashboardViewSet", "analytics_viewset.py", "Course dashboard.\nAggregations. IsTutor.")
+
+    Component(certificateViewset, "CertificateViewSet", "certificate_viewset.py", "Certificate generation\nand verification.")
+
+    Component(scoringService, "ScoringService", "scoring_service.py", "Score attempts.\nCreate Evaluation,\nFailedTopic, Telemetry.")
+    Component(axiomClient, "AxiomEngineClient", "axiom_service.py", "HTTP client for Go svc.\nFallback envelope.")
+    Component(certService, "CertificateGenerator", "certification_service.py", "Eligibility check.\nSHA-256 hash. Idempotent.")
+    Component(tokenSerializer, "AxiomTokenObtainPairSerializer", "token_serializer.py", "Custom JWT claims:\nrole, vark_dominant.")
+}
+
+ContainerDb(neonDB, "NeonDB PostgreSQL", "PostgreSQL")
+Container(s3, "AWS S3", "Object Storage")
+Container(axiomEngine, "AxiomEngine", "Go + Fiber, port 8080")
+
+Rel_D(attemptViewset, scoringService, "score_and_evaluate()")
+Rel_D(scoringService, axiomClient, "request_adaptive_plan()")
+Rel_D(axiomClient, axiomEngine, "POST /api/v1/adaptive-plan")
+Rel_D(certificateViewset, certService, "issue_certificate()")
+Rel_D(authViewset, tokenSerializer, "serializer_class")
+
+Rel_D(resourceViewset, s3, "Upload files")
+Rel_D(submissionViewset, s3, "Upload files")
+
+Rel_D(scoringService, neonDB, "Evaluation, FailedTopic,\nEvaluationTelemetry")
+Rel_D(analyticsViewset, neonDB, "Aggregation queries")
+Rel_D(certService, neonDB, "Certificate CRUD")
+
+@enduml

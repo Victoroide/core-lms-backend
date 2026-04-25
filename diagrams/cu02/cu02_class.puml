@@ -1,0 +1,47 @@
+@startuml CU02_Class
+!include ../_shared/global_style.iuml
+
+title CU-02 — Completar onboarding VARK: Diagrama de Clases
+
+package "apps.learning.viewsets.user_onboarding_viewset" <<Boundary>> {
+    class UserViewSet <<Boundary>> {
+        + queryset: LMSUser.objects.all()
+        + permission_classes: [IsAuthenticated]
+        --
+        + onboard(request, pk): Response
+    }
+
+    class VARKOnboardingSerializer <<Control>> {
+        + answers: VARKAnswerSerializer(many=True)
+        --
+        + is_valid(raise_exception): bool
+    }
+
+    class VARKAnswerSerializer <<Control>> {
+        + category: ChoiceField [visual | aural | read_write | kinesthetic]
+        + value: IntegerField [0..10]
+    }
+}
+
+package "apps.learning.models.user_model" <<Entity>> {
+    class LMSUser <<Entity>> {
+        + pk: int
+        + role: CharField [STUDENT | TUTOR]
+        + vark_dominant: CharField [visual | aural | read_write | kinesthetic]
+        --
+        + save(update_fields): None
+    }
+}
+
+package "apps.learning.permissions" {
+    class IsAuthenticated <<Control>> {
+        + has_permission(request, view): bool
+    }
+}
+
+UserViewSet --> VARKOnboardingSerializer : validates payload
+VARKOnboardingSerializer *-- VARKAnswerSerializer : answers
+UserViewSet ..> LMSUser : updates vark_dominant
+UserViewSet --> IsAuthenticated : permission_classes
+
+@enduml

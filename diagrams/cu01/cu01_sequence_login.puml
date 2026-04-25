@@ -1,0 +1,45 @@
+@startuml CU01_Sequence_Login
+!include ../_shared/global_style.iuml
+skinparam responseMessageBelowArrow true
+autonumber "<b>"
+
+title CU-01 — Gestionar sesión: Login JWT
+
+actor "Estudiante / Tutor" as Actor
+boundary "Angular\nAuthService" as AngularAuth
+control "RateLimitedTokenView\n(auth_viewset.py:14)" as TokenView
+entity "AxiomTokenObtainPairSerializer\n(token_serializer.py:7)" as Serializer
+entity "LMSUser\n(user_model.py:5)" as User
+database "NeonDB\nPostgreSQL" as DB
+
+Actor -> AngularAuth : POST /api/v1/auth/token/\n{ username, password }
+AngularAuth -> TokenView : post(request)
+
+alt request.limited == True (rate limit exceeded)
+    TokenView --> AngularAuth : HTTP 429\n{ "detail": "Too many login attempts. Try again later." }
+else rate limit OK
+    TokenView -> Serializer : validate(attrs)
+    Serializer -> User : authenticate(username, password)
+    User -> DB : SELECT * FROM lms_user\nWHERE username = ?
+    DB --> User : LMSUser row
+    
+    alt invalid credentials
+        User --> Serializer : None
+        Serializer --> TokenView : ValidationError
+        TokenView --> AngularAuth : HTTP 401\n{ "detail": "No active account..." }
+    else valid credentials
+        User --> Serializer : user instance
+        Serializer -> Serializer : get_token(user)
+        note right
+            token["role"] = user.role
+            token["vark_dominant"] = user.vark_dominant
+            token["user_id"] = user.pk
+        end note
+        Serializer --> TokenView : { access, refresh,\nuser: {id, username, email, role, vark_dominant, full_name} }
+        TokenView --> AngularAuth : HTTP 200\n{ access, refresh, user }
+    end
+end
+
+AngularAuth --> Actor : Store tokens\n(localStorage / sessionStorage)
+
+@enduml
