@@ -6,19 +6,23 @@ from apps.assessments.models import Quiz
 from apps.assessments.serializers import QuizDetailSerializer, QuizListSerializer
 
 
-class QuizViewSet(viewsets.ReadOnlyModelViewSet):
-    """Read-only endpoints for browsing active quizzes and their questions.
-    List returns a compact summary; detail returns the full question set
-    with answer choices for the Angular quiz-taking UI.
+from apps.learning.permissions import IsTutor
+from rest_framework.permissions import IsAuthenticated, AllowAny
 
-    **Public endpoint -- no authentication required.**
+class QuizViewSet(viewsets.ModelViewSet):
+    """Endpoints for browsing and managing quizzes.
+    Tutors can create, update, and delete quizzes. Students can only read active quizzes.
     """
 
     queryset = Quiz.objects.filter(is_active=True)
-    permission_classes = [AllowAny]
+    
+    def get_permissions(self):
+        if self.action in ("create", "update", "partial_update", "destroy"):
+            return [IsAuthenticated(), IsTutor()]
+        return [AllowAny()]
 
     def get_serializer_class(self):
-        if self.action == "retrieve":
+        if self.action == "retrieve" or self.action == "create":
             return QuizDetailSerializer
         return QuizListSerializer
 
