@@ -1,0 +1,303 @@
+@startuml AxiomLMS_ER_Diagram
+skinparam shadowing false
+skinparam backgroundColor White
+skinparam defaultFontName Arial
+skinparam defaultFontSize 11
+skinparam monochrome true
+skinparam linetype ortho
+skinparam nodesep 40
+skinparam ranksep 55
+skinparam padding 3
+skinparam classAttributeIconSize 0
+hide circle
+
+<style>
+root {
+    FontName "Arial"
+    FontSize 11
+    FontColor black
+    LineColor black
+    LineThickness 1.0
+    BackgroundColor white
+}
+element {
+    RoundCorner 0
+    Shadowing 0
+}
+classDiagram {
+    class {
+        BackgroundColor white
+        HeaderBackgroundColor #E8E8E8
+        BorderThickness 1.2
+    }
+}
+</style>
+
+' ===============================================
+' GROUPS
+' ===============================================
+
+together {
+    entity "lms_user" as lms_user {
+        * id : BIGINT <<PK>>
+        --
+        * password : VARCHAR(128)
+        last_login : TIMESTAMPTZ
+        * is_superuser : BOOLEAN
+        * username : VARCHAR(150) <<UK>>
+        * first_name : VARCHAR(150)
+        * last_name : VARCHAR(150)
+        * email : VARCHAR(254)
+        * is_staff : BOOLEAN
+        * is_active : BOOLEAN
+        * date_joined : TIMESTAMPTZ
+        * role : VARCHAR(10)
+        * vark_dominant : VARCHAR(15)
+    }
+}
+
+together {
+    entity "career" as career {
+        * id : BIGINT <<PK>>
+        --
+        * name : VARCHAR(200)
+        * code : VARCHAR(20) <<UK>>
+        * description : TEXT
+        * created_at : TIMESTAMPTZ
+    }
+    note right of career : SoftDelete: is_deleted BOOLEAN, deleted_at TIMESTAMPTZ
+
+    entity "semester" as semester {
+        * id : BIGINT <<PK>>
+        --
+        * name : VARCHAR(100)
+        * number : INTEGER <<UK>>
+        * year : INTEGER <<UK>>
+        * period : VARCHAR(10)
+        * created_at : TIMESTAMPTZ
+        * career_id : BIGINT <<FK>> <<UK>>
+    }
+    note right of semester : SoftDelete: is_deleted BOOLEAN, deleted_at TIMESTAMPTZ
+
+    entity "course" as course {
+        * id : BIGINT <<PK>>
+        --
+        * name : VARCHAR(200)
+        * code : VARCHAR(20) <<UK>>
+        * description : TEXT
+        * created_at : TIMESTAMPTZ
+        semester_id : BIGINT <<FK>>
+    }
+    note right of course : SoftDelete: is_deleted BOOLEAN, deleted_at TIMESTAMPTZ
+}
+
+together {
+    entity "module" as module {
+        * id : BIGINT <<PK>>
+        --
+        * title : VARCHAR(255)
+        * description : TEXT
+        * order : INTEGER
+        * course_id : BIGINT <<FK>>
+    }
+    note right of module : SoftDelete: is_deleted BOOLEAN, deleted_at TIMESTAMPTZ
+
+    entity "lesson" as lesson {
+        * id : BIGINT <<PK>>
+        --
+        * title : VARCHAR(255)
+        * content : TEXT
+        * order : INTEGER
+        * module_id : BIGINT <<FK>>
+    }
+    note right of lesson : SoftDelete: is_deleted BOOLEAN, deleted_at TIMESTAMPTZ
+
+    entity "resource" as resource {
+        * id : BIGINT <<PK>>
+        --
+        * file : VARCHAR(100)
+        * resource_type : VARCHAR(10)
+        * title : VARCHAR(255)
+        * created_at : TIMESTAMPTZ
+        * lesson_id : BIGINT <<FK>>
+        uploaded_by_id : BIGINT <<FK>>
+    }
+    note right of resource : SoftDelete: is_deleted BOOLEAN, deleted_at TIMESTAMPTZ
+}
+
+together {
+    entity "assignment" as assignment {
+        * id : BIGINT <<PK>>
+        --
+        * title : VARCHAR(255)
+        * description : TEXT
+        due_date : TIMESTAMPTZ
+        * max_score : DECIMAL(6,2)
+        * created_at : TIMESTAMPTZ
+        * lesson_id : BIGINT <<FK>>
+        created_by_id : BIGINT <<FK>>
+    }
+    note right of assignment : SoftDelete: is_deleted BOOLEAN, deleted_at TIMESTAMPTZ
+
+    entity "submission" as submission {
+        * id : BIGINT <<PK>>
+        --
+        * file : VARCHAR(100)
+        * submitted_at : TIMESTAMPTZ
+        grade : DECIMAL(6,2)
+        graded_at : TIMESTAMPTZ
+        * assignment_id : BIGINT <<FK>> <<UK>>
+        * student_id : BIGINT <<FK>> <<UK>>
+    }
+    note right of submission : SoftDelete: is_deleted BOOLEAN, deleted_at TIMESTAMPTZ
+}
+
+together {
+    entity "quiz" as quiz {
+        * id : BIGINT <<PK>>
+        --
+        * title : VARCHAR(255)
+        * description : TEXT
+        * time_limit_minutes : INTEGER
+        * is_active : BOOLEAN
+        * created_at : TIMESTAMPTZ
+        * course_id : BIGINT <<FK>>
+    }
+
+    entity "question" as question {
+        * id : BIGINT <<PK>>
+        --
+        * text : TEXT
+        * concept_id : VARCHAR(100)
+        * order : INTEGER
+        * quiz_id : BIGINT <<FK>>
+    }
+
+    entity "answer_choice" as answer_choice {
+        * id : BIGINT <<PK>>
+        --
+        * text : VARCHAR(500)
+        * is_correct : BOOLEAN
+        * question_id : BIGINT <<FK>>
+    }
+}
+
+together {
+    entity "quiz_attempt" as quiz_attempt {
+        * id : BIGINT <<PK>>
+        --
+        * start_time : TIMESTAMPTZ
+        end_time : TIMESTAMPTZ
+        final_score : DECIMAL(6,2)
+        * is_submitted : BOOLEAN
+        adaptive_plan : JSONB
+        * student_id : BIGINT <<FK>>
+        * quiz_id : BIGINT <<FK>>
+    }
+
+    entity "attempt_answer" as attempt_answer {
+        * id : BIGINT <<PK>>
+        --
+        * attempt_id : BIGINT <<FK>> <<UK>>
+        * question_id : BIGINT <<FK>> <<UK>>
+        * selected_choice_id : BIGINT <<FK>>
+    }
+
+    entity "proctoring_log" as proctoring_log {
+        * id : BIGINT <<PK>>
+        --
+        * event_type : VARCHAR(25)
+        * timestamp : TIMESTAMPTZ
+        * severity_score : DECIMAL(4,2)
+        * attempt_id : BIGINT <<FK>>
+    }
+}
+
+together {
+    entity "evaluation" as evaluation {
+        * id : BIGINT <<PK>>
+        --
+        * score : DECIMAL(6,2)
+        * max_score : DECIMAL(6,2)
+        * created_at : TIMESTAMPTZ
+        * student_id : BIGINT <<FK>>
+        * course_id : BIGINT <<FK>>
+    }
+
+    entity "failed_topic" as failed_topic {
+        * id : BIGINT <<PK>>
+        --
+        * concept_id : VARCHAR(100)
+        * score : DECIMAL(6,2)
+        * max_score : DECIMAL(6,2)
+        * evaluation_id : BIGINT <<FK>>
+    }
+
+    entity "evaluation_telemetry" as evaluation_telemetry {
+        * id : BIGINT <<PK>>
+        --
+        * time_on_task_seconds : INTEGER
+        * clicks : INTEGER
+        * evaluation_id : BIGINT <<FK>> <<UK>>
+    }
+
+    entity "certificate" as certificate {
+        * id : BIGINT <<PK>>
+        --
+        * issued_at : TIMESTAMPTZ
+        * certificate_hash : VARCHAR(64) <<UK>>
+        * student_id : BIGINT <<FK>> <<UK>>
+        * course_id : BIGINT <<FK>> <<UK>>
+    }
+}
+
+' ===============================================
+' RELATIONSHIPS
+' ===============================================
+
+' Academic Ontology
+career ||--o{ semester : "career_id"
+semester ||--o{ course : "semester_id" (nullable)
+course ||--o{ module : "course_id"
+module ||--o{ lesson : "module_id"
+
+' Curriculum & Resources
+lesson ||--o{ resource : "lesson_id"
+lesson ||--o{ assignment : "lesson_id"
+assignment ||--o{ submission : "assignment_id"
+
+' Assessments
+course ||--o{ quiz : "course_id"
+quiz ||--o{ question : "quiz_id"
+question ||--o{ answer_choice : "question_id"
+quiz ||--o{ quiz_attempt : "quiz_id"
+quiz_attempt ||--o{ attempt_answer : "attempt_id"
+question ||--o{ attempt_answer : "question_id"
+answer_choice ||--o{ attempt_answer : "selected_choice_id"
+quiz_attempt ||--o{ proctoring_log : "attempt_id"
+
+' Evaluations
+course ||--o{ evaluation : "course_id"
+evaluation ||--o{ failed_topic : "evaluation_id"
+evaluation ||--|| evaluation_telemetry : "evaluation_id"
+course ||--o{ certificate : "course_id"
+
+' User Relationships
+lms_user ||--o{ resource : "uploaded_by_id" (nullable)
+lms_user ||--o{ assignment : "created_by_id" (nullable)
+lms_user ||--o{ submission : "student_id"
+lms_user ||--o{ quiz_attempt : "student_id"
+lms_user ||--o{ evaluation : "student_id"
+lms_user ||--o{ certificate : "student_id"
+
+' ===============================================
+' LAYOUT GUIDES
+' ===============================================
+lms_user -[hidden]down- career
+lms_user -[hidden]right- course
+course -[hidden]right- assignment
+course -[hidden]down- quiz
+quiz -[hidden]right- quiz_attempt
+evaluation -[hidden]up- quiz
+
+@enduml
