@@ -1,13 +1,15 @@
 from drf_yasg.utils import swagger_auto_schema
 from rest_framework import viewsets
-from rest_framework.permissions import AllowAny
+from rest_framework.permissions import AllowAny, IsAuthenticated
 
 from apps.assessments.models import Quiz
-from apps.assessments.serializers import QuizDetailSerializer, QuizListSerializer, QuizTutorSerializer
-
-
+from apps.assessments.serializers import (
+    QuizDetailSerializer,
+    QuizListSerializer,
+    QuizTutorSerializer,
+)
 from apps.learning.permissions import IsTutor
-from rest_framework.permissions import IsAuthenticated, AllowAny
+
 
 class QuizViewSet(viewsets.ModelViewSet):
     """Endpoints for browsing and managing quizzes.
@@ -16,15 +18,19 @@ class QuizViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         queryset = Quiz.objects.all()
-        if not (self.request.user.is_authenticated and self.request.user.role == "TUTOR"):
+        is_tutor = (
+            self.request.user.is_authenticated
+            and self.request.user.role == "TUTOR"
+        )
+        if not is_tutor:
             queryset = queryset.filter(is_active=True)
-        
+
         course_id = self.request.query_params.get("course")
         if course_id:
             queryset = queryset.filter(course_id=course_id)
-            
+
         return queryset
-    
+
     def get_permissions(self):
         if self.action in ("create", "update", "partial_update", "destroy"):
             return [IsAuthenticated(), IsTutor()]
@@ -43,13 +49,13 @@ class QuizViewSet(viewsets.ModelViewSet):
         tags=["Quizzes"],
     )
     def list(self, request, *args, **kwargs):
-        """Transposes and serializes the active sequential listing representation for operational Quizzes.
+        """Return a paginated list of active quizzes.
 
         Args:
-            request (Request): The incoming operational HTTP REST framework request sequence.
+            request (Request): The incoming HTTP request.
 
         Returns:
-            Response: A structured standard DRF Response mapping containing the sequential JSON metadata.
+            Response: A DRF Response containing the serialized quiz list.
         """
         return super().list(request, *args, **kwargs)
 
@@ -62,12 +68,12 @@ class QuizViewSet(viewsets.ModelViewSet):
         tags=["Quizzes"],
     )
     def retrieve(self, request, *args, **kwargs):
-        """Generates dynamic relational serialization for a unified operational Quiz instance detail payload view.
+        """Return a single quiz with nested questions and answer choices.
 
         Args:
-            request (Request): The incoming operational HTTP REST framework request sequence.
+            request (Request): The incoming HTTP request.
 
         Returns:
-            Response: A structured DRF Response instance binding the absolute entity topological JSON layout configurations.
+            Response: A DRF Response with the serialized quiz detail payload.
         """
         return super().retrieve(request, *args, **kwargs)

@@ -1,6 +1,6 @@
 from rest_framework import serializers
 
-from apps.assessments.models import AttemptAnswer, QuizAttempt
+from apps.assessments.models import QuizAttempt
 
 
 class AttemptAnswerSerializer(serializers.Serializer):

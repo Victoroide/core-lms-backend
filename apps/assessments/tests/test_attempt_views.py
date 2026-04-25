@@ -7,7 +7,7 @@ from rest_framework import status
 from rest_framework.test import APITestCase
 from rest_framework_simplejwt.tokens import RefreshToken
 
-from apps.assessments.models import AnswerChoice, Question, Quiz, QuizAttempt
+from apps.assessments.models import AnswerChoice, Question, Quiz
 from apps.learning.models import Course, LMSUser
 
 

@@ -36,7 +36,9 @@ class AssignmentViewSet(viewsets.ModelViewSet):
 
     @swagger_auto_schema(
         operation_summary="List assignments",
-        operation_description="Returns a paginated list of lesson assignments. Filter by ?lesson=<id>.",
+        operation_description=(
+            "Returns a paginated list of lesson assignments. Filter by ?lesson=<id>."
+        ),
         tags=["Assignments"],
     )
     def list(self, request, *args, **kwargs):
@@ -126,7 +128,9 @@ class AssignmentViewSet(viewsets.ModelViewSet):
 
     @swagger_auto_schema(
         operation_summary="Soft-delete an assignment",
-        operation_description="Soft-deletes an assignment (marks is_deleted=True). Restricted to tutors.",
+        operation_description=(
+            "Soft-deletes an assignment (marks is_deleted=True). Restricted to tutors."
+        ),
         tags=["Assignments"],
     )
     def destroy(self, request, *args, **kwargs):

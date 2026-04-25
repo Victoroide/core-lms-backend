@@ -119,7 +119,9 @@ class SubmissionViewSet(viewsets.ModelViewSet):
 
     @swagger_auto_schema(
         operation_summary="Grade a student submission",
-        operation_description="Apply a numeric grade to a submitted assignment. Restricted to tutors.",
+        operation_description=(
+            "Apply a numeric grade to a submitted assignment. Restricted to tutors."
+        ),
         tags=["Submissions"],
         request_body=openapi.Schema(
             type=openapi.TYPE_OBJECT,
@@ -211,7 +213,9 @@ class SubmissionViewSet(viewsets.ModelViewSet):
 
     @swagger_auto_schema(
         operation_summary="Soft-delete a submission",
-        operation_description="Soft-deletes a submission (marks is_deleted=True). Restricted to tutors.",
+        operation_description=(
+            "Soft-deletes a submission (marks is_deleted=True). Restricted to tutors."
+        ),
         tags=["Submissions"],
     )
     def destroy(self, request, *args, **kwargs):

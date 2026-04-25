@@ -73,13 +73,22 @@ QUESTION_BANK = [
         "choices": [
             {"text": "A blueprint for creating instances", "is_correct": False},
             {"text": "A module that contains functions", "is_correct": False},
-            {"text": "An instance of a class that encapsulates state and behavior", "is_correct": True},
+            {
+                "text": (
+                    "An instance of a class that encapsulates "
+                    "state and behavior"
+                ),
+                "is_correct": True,
+            },
             {"text": "A global variable accessible from any scope", "is_correct": False},
         ],
     },
     {
         "concept_id": "Polymorphism",
-        "text": "Which principle allows a single interface to represent different underlying data types?",
+        "text": (
+            "Which principle allows a single interface to represent "
+            "different underlying data types?"
+        ),
         "choices": [
             {"text": "Encapsulation", "is_correct": False},
             {"text": "Polymorphism", "is_correct": True},

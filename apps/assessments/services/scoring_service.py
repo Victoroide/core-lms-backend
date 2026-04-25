@@ -21,7 +21,7 @@ class ScoringService:
     """
 
     def score_and_evaluate(self, attempt: QuizAttempt) -> dict:
-        """Compute the score for a QuizAttempt, persist tracking records, and request an adaptive plan.
+        """Compute the score, persist tracking records, and request an adaptive plan.
 
         Args:
             attempt (QuizAttempt): The attempt record requiring scoring.
@@ -106,4 +106,3 @@ class ScoringService:
             "evaluation_id": evaluation.pk,
             "adaptive_plan": adaptive_plan,
         }
-

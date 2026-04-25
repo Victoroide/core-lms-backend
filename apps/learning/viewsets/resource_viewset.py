@@ -38,7 +38,10 @@ class ResourceViewSet(viewsets.ModelViewSet):
 
     @swagger_auto_schema(
         operation_summary="List resources",
-        operation_description="Returns a paginated list of resources. Filter by ?lesson=<id> or ?resource_type=<type>.",
+        operation_description=(
+            "Returns a paginated list of resources. "
+            "Filter by ?lesson=<id> or ?resource_type=<type>."
+        ),
         tags=["Resources"],
     )
     def list(self, request, *args, **kwargs):
@@ -128,7 +131,9 @@ class ResourceViewSet(viewsets.ModelViewSet):
 
     @swagger_auto_schema(
         operation_summary="Soft-delete a resource",
-        operation_description="Soft-deletes a resource (marks is_deleted=True). Restricted to tutors.",
+        operation_description=(
+            "Soft-deletes a resource (marks is_deleted=True). Restricted to tutors."
+        ),
         tags=["Resources"],
     )
     def destroy(self, request, *args, **kwargs):

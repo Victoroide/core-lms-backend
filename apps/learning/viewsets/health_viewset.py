@@ -7,7 +7,10 @@ from rest_framework.response import Response
 @swagger_auto_schema(
     method="get",
     operation_summary="Liveness probe.",
-    operation_description="Public health check endpoint. Returns {status: ok} with no authentication required.",
+    operation_description=(
+        "Public health check endpoint. Returns {status: ok} "
+        "with no authentication required."
+    ),
     tags=["System"],
     responses={200: "Application is healthy."},
 )

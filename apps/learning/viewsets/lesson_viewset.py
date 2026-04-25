@@ -134,7 +134,9 @@ class LessonViewSet(viewsets.ModelViewSet):
 
     @swagger_auto_schema(
         operation_summary="Soft-delete a lesson",
-        operation_description="Soft-deletes a lesson (marks is_deleted=True). Restricted to tutors.",
+        operation_description=(
+            "Soft-deletes a lesson (marks is_deleted=True). Restricted to tutors."
+        ),
         tags=["Academic Ontology"],
     )
     def destroy(self, request, *args, **kwargs):

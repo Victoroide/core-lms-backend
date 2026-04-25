@@ -1,6 +1,5 @@
 from drf_yasg.utils import swagger_auto_schema
 from rest_framework import status, viewsets
-from rest_framework.decorators import action
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
@@ -144,7 +143,10 @@ class CourseViewSet(viewsets.ModelViewSet):
 
     @swagger_auto_schema(
         operation_summary="Soft-delete a course",
-        operation_description="Soft-deletes a course (marks is_deleted=True). Restricted to tutors.",
+        operation_description=(
+            "Soft-deletes a course (marks is_deleted=True)."
+            " Restricted to tutors."
+        ),
         tags=["Academic Ontology"],
     )
     def destroy(self, request, *args, **kwargs):

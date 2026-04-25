@@ -145,11 +145,21 @@ class CertificateViewSet(viewsets.ViewSet):
                 schema=openapi.Schema(
                     type=openapi.TYPE_OBJECT,
                     properties={
-                        "is_valid": openapi.Schema(type=openapi.TYPE_BOOLEAN, example=True),
-                        "hash": openapi.Schema(type=openapi.TYPE_STRING, example="a3f8..."),
-                        "issued_at": openapi.Schema(type=openapi.TYPE_STRING, format="date-time"),
-                        "student_name": openapi.Schema(type=openapi.TYPE_STRING, example="John Doe"),
-                        "course_name": openapi.Schema(type=openapi.TYPE_STRING, example="Advanced Programming"),
+                        "is_valid": openapi.Schema(
+                            type=openapi.TYPE_BOOLEAN, example=True
+                        ),
+                        "hash": openapi.Schema(
+                            type=openapi.TYPE_STRING, example="a3f8..."
+                        ),
+                        "issued_at": openapi.Schema(
+                            type=openapi.TYPE_STRING, format="date-time"
+                        ),
+                        "student_name": openapi.Schema(
+                            type=openapi.TYPE_STRING, example="John Doe"
+                        ),
+                        "course_name": openapi.Schema(
+                            type=openapi.TYPE_STRING, example="Advanced Programming"
+                        ),
                     },
                 ),
             ),

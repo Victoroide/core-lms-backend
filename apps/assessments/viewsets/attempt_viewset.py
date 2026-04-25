@@ -137,13 +137,15 @@ class AttemptViewSet(viewsets.ViewSet):
         },
     )
     def create(self, request):
-        """Processes the inbound authenticated evaluation component sequence.
+        """Submit a quiz attempt and trigger scoring.
 
         Args:
-            request (Request): The incoming authenticated HTTP REST framework request pipeline segment with JSON operational payload.
+            request (Request): The incoming authenticated HTTP request
+                carrying the JSON submission payload.
 
         Returns:
-            Response: A structured DRF Response object containing the serialized AttemptResult mapping arrays and contextual response codes.
+            Response: A DRF Response with the serialized AttemptResult
+                payload and the appropriate HTTP status code.
         """
         serializer = AttemptSubmitSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)

@@ -3,14 +3,14 @@ from django.db import models
 
 
 class Evaluation(models.Model):
-    """Dynamically parses and records a standard target assessment configuration matrix structure.
+    """Persisted record of a single assessment outcome for a student in a course.
 
     Attributes:
-        student (LMSUser): The relational pointer configuring the explicit mapped student structure assignment logic.
-        course (Course): The primary key mapped configuration identifying the testing boundary parameter target point.
-        score (Decimal): The standard decimal formatted outcome integer metrics configuration score mapping array.
-        max_score (Decimal): The deterministic scalar structural outcome maximum threshold score constraint property point parameters.
-        created_at (datetime): The UTC-aligned relational timestamp sequence mapping.
+        student (LMSUser): The student to whom this evaluation belongs.
+        course (Course): The course this evaluation is scoped to.
+        score (Decimal): The score the student obtained.
+        max_score (Decimal): The maximum score available for this evaluation.
+        created_at (datetime): UTC timestamp set when the record is created.
     """
 
     student = models.ForeignKey(
@@ -32,9 +32,12 @@ class Evaluation(models.Model):
         ordering = ["-created_at"]
 
     def __str__(self):
-        """Computes a structural debug evaluation reference array formatted target string pointer property mapping segment map.
+        """Return a debug label of the form ``Eval#<pk> <student> - <code> (s/max)``.
 
         Returns:
-            str: The structured JSON component topological mapping output.
+            str: Human-readable evaluation label.
         """
-        return f"Eval#{self.pk} {self.student} - {self.course.code} ({self.score}/{self.max_score})"
+        return (
+            f"Eval#{self.pk} {self.student} - {self.course.code} "
+            f"({self.score}/{self.max_score})"
+        )

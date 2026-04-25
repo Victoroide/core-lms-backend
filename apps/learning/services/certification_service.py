@@ -3,7 +3,6 @@ import logging
 from decimal import Decimal
 
 from django.db import IntegrityError
-from django.db.models import Q
 from django.utils import timezone
 
 from apps.assessments.models import QuizAttempt
@@ -26,28 +25,29 @@ class CertificateGenerator:
 
     @staticmethod
     def _compute_hash(student_id: int, course_id: int, issued_at_iso: str) -> str:
-        """Generate a secure SHA-256 hexadecimal digest from the composite credential key.
+        """Compute the SHA-256 hex digest used as the certificate identifier.
 
         Args:
-            student_id (int): The primary key of the LMSUser acquiring the certification.
-            course_id (int): The primary key of the Course entity being certified.
-            issued_at_iso (str): The ISO-8601 formatted temporal timestamp of the issuance operation.
+            student_id (int): Primary key of the LMSUser receiving the certificate.
+            course_id (int): Primary key of the certified Course.
+            issued_at_iso (str): ISO-8601 timestamp of issuance.
 
         Returns:
-            str: The 64-character SHA-256 hexadecimal cryptographic digest sequence.
+            str: 64-character SHA-256 hexadecimal digest.
         """
         payload = f"{student_id}:{course_id}:{issued_at_iso}"
         return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
     def _verify_eligibility(self, student: LMSUser, course: Course) -> None:
-        """Confirm the student entity has satisfied the threshold evaluations or quizzes for this course.
+        """Confirm ``student`` has met the passing threshold for ``course``.
 
         Args:
-            student (LMSUser): The student user node entity under verification logic.
-            course (Course): The target course node entity.
+            student (LMSUser): The student under verification.
+            course (Course): The target course.
 
         Raises:
-            CertificateEligibilityError: If the user entity has failed to satisfy the minimum established passing constraints parameters.
+            CertificateEligibilityError: If the student has not met the
+                minimum passing score on either an Evaluation or a QuizAttempt.
         """
         has_passing_evaluation = Evaluation.objects.filter(
             student=student,
@@ -73,23 +73,24 @@ class CertificateGenerator:
             )
 
     def issue_certificate(self, student: LMSUser, course: Course) -> Certificate:
-        """Authoritatively issue a verifiable cryptographic certificate for a student mapping pair.
+        """Issue (or return the existing) certificate for ``student`` in ``course``.
 
-        Workflow sequence:
-            1. Transpose verification protocol over the student's passing threshold conditions.
-            2. Safely return the pre-existing certification token if one has previously been authored.
-            3. Cryptographically derive a new SHA-256 secure hash token sequence mapping.
-            4. Persist and return the resulting Certificate database relational record.
+        Workflow:
+            1. Verify the student meets the passing threshold.
+            2. Return the existing certificate if one already exists.
+            3. Derive a new SHA-256 hash for the certificate identifier.
+            4. Persist and return the resulting Certificate row.
 
         Args:
-            student (LMSUser): The LMSUser operational instance (requires the structural role mapping parameter variant STUDENT).
-            course (Course): The designated Course operational structural instance designated to certify completion logic against.
+            student (LMSUser): The student being certified (must be a STUDENT).
+            course (Course): The course being certified.
 
         Returns:
-            Certificate: The newly committed relational database record or the preexisting Certificate object instance.
+            Certificate: The newly created or pre-existing certificate row.
 
         Raises:
-            CertificateEligibilityError: If the operational student target entity sequence has not fulfilled passing criterion protocols.
+            CertificateEligibilityError: If the student has not met the
+                passing criteria for this course.
         """
         self._verify_eligibility(student, course)
 

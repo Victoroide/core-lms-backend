@@ -1,0 +1,19 @@
+[flake8]
+max-line-length = 100
+extend-exclude =
+    .venv,
+    .git,
+    __pycache__,
+    */migrations/*,
+    resources,
+    submissions,
+    diagrams,
+    docs,
+    scripts,
+    node_modules
+extend-ignore =
+    W503,
+    E203
+per-file-ignores =
+    __init__.py: F401
+    core_lms/settings.py: E501

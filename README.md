@@ -70,3 +70,16 @@ The framework operationalizes dynamic OpenAPI documentation formats via `drf-yas
 3. **Persist Execution Constraints**: Copy the resulting structural `access` object hash array constraint.
 4. **Authorize Interactor Sequence**: Locate the dynamic `Authorize` logic button object layout within the web sequence, and synthesize the authentication format exactly as `Bearer <your_access_token>`.
 5. **Execution Confirmation**: Engage the operational sequence structural save button syntax layout object maps array.
+
+## Code Quality
+
+This project enforces PEP 8 via `flake8`. Configuration lives in [`.flake8`](.flake8) at the repo root (max line length 100; auto-generated `migrations/` are excluded).
+
+Install dev dependencies (uses [`requirements-dev.txt`](requirements-dev.txt), which pulls in `requirements.txt`) and run the linter:
+
+```bash
+python -m pip install -r requirements-dev.txt
+python -m flake8
+```
+
+Expected: no output, exit code `0`.

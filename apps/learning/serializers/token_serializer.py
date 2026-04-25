@@ -1,25 +1,24 @@
 """Custom JWT token serializer for AxiomLMS."""
 
-from drf_yasg import openapi
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 
 
 class AxiomTokenObtainPairSerializer(TokenObtainPairSerializer):
-    """Custom standard JWT obtaining serialization object implementation logic.
-    
+    """Custom JWT serializer that embeds extra LMS-specific claims.
+
     Extends TokenObtainPairSerializer to embed user-specific claims directly
     into the JWT payload and the response structure, supporting routing logic.
     """
 
     @classmethod
     def get_token(cls, user):
-        """Construct the configuration JWT sequence mapped tokens for user generation.
+        """Build the JWT for ``user`` with role/profile claims embedded.
 
         Args:
-            user (LMSUser): The authentication verification payload identity target execution context object.
+            user (LMSUser): The authenticated user.
 
         Returns:
-            Token: The fully constructed programmatic logic mapped output authorization entity sequence.
+            Token: The JWT with custom claims attached.
         """
         token = super().get_token(user)
 
@@ -31,13 +30,13 @@ class AxiomTokenObtainPairSerializer(TokenObtainPairSerializer):
         return token
 
     def validate(self, attrs):
-        """Perform programmatic attribute validation execution against standard rules.
+        """Validate credentials and augment the response with a user object.
 
         Args:
-            attrs (dict): The parameter request dictionary variable dictionary input mappings sequence.
+            attrs (dict): The credential payload submitted by the client.
 
         Returns:
-            dict: The successful structural response containing embedded user dictionary configuration mapped keys.
+            dict: The token response augmented with a nested ``user`` dict.
         """
         data = super().validate(attrs)
 

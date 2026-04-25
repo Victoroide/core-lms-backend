@@ -124,4 +124,3 @@ class AxiomEngineClient:
             result.get("_meta", {}).get("total_latency_ms"),
         )
         return result
-

@@ -134,14 +134,15 @@ class TeacherDashboardViewSet(viewsets.ViewSet):
         url_path=r"course/(?P<course_id>[^/.]+)/dashboard",
     )
     def course_dashboard(self, request, course_id=None):
-        """Processes and dynamically computes the core dashboard metric structures for a targeted course context.
+        """Compute dashboard metrics for a single course.
 
         Args:
-            request (Request): The incoming authenticated HTTP REST framework request pipeline segment.
-            course_id (int, optional): The universally unique identifier string for the objective course context mapping. Defaults to None.
+            request (Request): The incoming authenticated HTTP request.
+            course_id (int, optional): Primary key of the target course.
+                Defaults to None.
 
         Returns:
-            Response: A structured DRF Response object containing the serialized JSON topological metadata mapping arrays.
+            Response: A DRF Response with the serialized dashboard payload.
         """
         try:
             course = Course.objects.get(pk=course_id)

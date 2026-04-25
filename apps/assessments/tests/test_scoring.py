@@ -1,8 +1,7 @@
 """Unit tests for ScoringService: concept identification, FailedTopic creation,
 AxiomEngine integration, and fallback behavior."""
 
-from decimal import Decimal
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 
 import requests
 from django.test import TestCase
@@ -48,7 +47,7 @@ def _build_quiz_graph():
     q1 = Question.objects.create(
         quiz=quiz, text="Q1", concept_id="oop_inheritance", order=1
     )
-    q1_correct = AnswerChoice.objects.create(
+    AnswerChoice.objects.create(
         question=q1, text="Correct", is_correct=True
     )
     q1_wrong = AnswerChoice.objects.create(

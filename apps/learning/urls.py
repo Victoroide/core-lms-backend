@@ -24,4 +24,3 @@ router.register(r"resources", ResourceViewSet, basename="resource")
 router.register(r"certificates", CertificateViewSet, basename="certificate")
 
 urlpatterns = router.urls
-

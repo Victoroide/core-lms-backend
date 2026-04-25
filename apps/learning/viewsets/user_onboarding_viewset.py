@@ -116,14 +116,15 @@ class UserViewSet(viewsets.GenericViewSet):
     )
     @action(detail=True, methods=["post"], url_path="onboard")
     def onboard(self, request, pk=None):
-        """Calculates and dynamically persists the overriding VARK modality index context.
+        """Persist the user's dominant VARK modality from onboarding answers.
 
         Args:
-            request (Request): The incoming authenticated HTTP REST framework request payload configuration segment.
-            pk (int, optional): The unified parameter string pointer referencing the targeted schema. Defaults to None.
+            request (Request): The incoming authenticated HTTP request.
+            pk (int, optional): Primary key of the target user. Defaults to None.
 
         Returns:
-            Response: A valid JSON layout referencing the dynamically updated string constant map keys or integral failure mapping properties.
+            Response: JSON payload with the updated user record, or an
+                error mapping on failure.
         """
         user = self.get_object()
 

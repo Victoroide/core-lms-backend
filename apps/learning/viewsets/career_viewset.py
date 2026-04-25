@@ -133,7 +133,9 @@ class CareerViewSet(viewsets.ModelViewSet):
 
     @swagger_auto_schema(
         operation_summary="Soft-delete a career",
-        operation_description="Soft-deletes a career (marks is_deleted=True). Restricted to tutors.",
+        operation_description=(
+            "Soft-deletes a career (marks is_deleted=True). Restricted to tutors."
+        ),
         tags=["Academic Ontology"],
     )
     def destroy(self, request, *args, **kwargs):

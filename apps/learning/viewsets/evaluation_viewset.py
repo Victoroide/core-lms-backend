@@ -40,15 +40,16 @@ class EvaluationViewSet(viewsets.ModelViewSet):
         },
     )
     def create(self, request, *args, **kwargs):
-        """Processes the serialized evaluation and triggers the autonomous deterministic Go computation array pipeline.
+        """Persist a new evaluation and request an adaptive plan from AxiomEngine.
 
         Args:
-            request (Request): The incoming authenticated HTTP REST framework request pipeline sequence.
-            *args: Variable length parameter list bindings.
-            **kwargs: Arbitrary dictionary keyword arguments mapping.
+            request (Request): The incoming authenticated HTTP request.
+            *args: Variable length argument list.
+            **kwargs: Arbitrary keyword arguments.
 
         Returns:
-            Response: A structured DRF Response instance binding the sequential AxiomEngine adaptive plan output JSON payload map.
+            Response: A DRF Response with the evaluation data plus the
+                AxiomEngine adaptive plan (or an ``axiom_error`` mapping).
         """
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
@@ -81,57 +82,57 @@ class EvaluationViewSet(viewsets.ModelViewSet):
 
     @swagger_auto_schema(tags=["Evaluations"])
     def list(self, request, *args, **kwargs):
-        """Produces a paginated sequential relational array listing corresponding to all available evaluation topological records.
+        """Return a paginated list of evaluations.
 
         Args:
-            request (Request): The incoming authenticated sequence REST request component.
-            *args: Variable length argument map index parameters.
-            **kwargs: Arbitrary parameter mapping keyword configurations.
+            request (Request): The incoming authenticated HTTP request.
+            *args: Variable length argument list.
+            **kwargs: Arbitrary keyword arguments.
 
         Returns:
-            Response: A formatted paginated serialized model dict instance mapped response array.
+            Response: Paginated serialized evaluation data.
         """
         return super().list(request, *args, **kwargs)
 
     @swagger_auto_schema(tags=["Evaluations"])
     def retrieve(self, request, *args, **kwargs):
-        """Retrieves and sequentially parses a singular discrete relational mapping record designated by the provided primary key identifier.
+        """Return a single evaluation identified by primary key.
 
         Args:
-            request (Request): The incoming standard application REST topological request configuration.
-            *args: Variable length operational parameter sequences.
-            **kwargs: Arbitrary contextual map arguments mapping.
+            request (Request): The incoming authenticated HTTP request.
+            *args: Variable length argument list.
+            **kwargs: Arbitrary keyword arguments.
 
         Returns:
-            Response: A unified structured serialization configuration derived from the absolute corresponding Evaluation object parameter array.
+            Response: Serialized evaluation data.
         """
         return super().retrieve(request, *args, **kwargs)
 
     @swagger_auto_schema(tags=["Evaluations"])
     def update(self, request, *args, **kwargs):
-        """Applies a complete structural HTTP PUT topological sequence to a referenced Evaluation instance pointer.
+        """Apply a full update to an evaluation record (HTTP PUT).
 
         Args:
-            request (Request): The inbound structured DRF REST framework mapped sequence array payload.
-            *args: Operational variable parameter topological list structures.
-            **kwargs: Dynamic relational dictionary operational arguments mappings.
+            request (Request): The incoming authenticated HTTP request.
+            *args: Variable length argument list.
+            **kwargs: Arbitrary keyword arguments.
 
         Returns:
-            Response: An isolated DRF Response detailing the fully modified JSON instance topological struct format.
+            Response: Serialized updated evaluation data.
         """
         return super().update(request, *args, **kwargs)
 
     @swagger_auto_schema(tags=["Evaluations"])
     def partial_update(self, request, *args, **kwargs):
-        """Parses and sequentially incorporates a partial HTTP PATCH update parameter sequence constraint to the objective Evaluation dictionary mapping instance.
+        """Apply a partial update to an evaluation record (HTTP PATCH).
 
         Args:
-            request (Request): The inbound HTTP framework topological segment map.
-            *args: Contextual numeric and logical array parameter list pointers.
-            **kwargs: Distinct relational structure key-to-value map structures.
+            request (Request): The incoming authenticated HTTP request.
+            *args: Variable length argument list.
+            **kwargs: Arbitrary keyword arguments.
 
         Returns:
-            Response: A detailed array containing the specifically modified parameter structures mapping configuration layout.
+            Response: Serialized updated evaluation data.
         """
         return super().partial_update(request, *args, **kwargs)
 
