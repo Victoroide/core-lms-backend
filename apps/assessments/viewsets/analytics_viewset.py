@@ -199,17 +199,24 @@ class TeacherDashboardViewSet(viewsets.ViewSet):
             for entry in vark_qs
         }
 
-        # -- Top 3 Most Failed Concepts ----------------------------------------
-        top_failed_qs = (
+        # -- Top Failed Concepts (All for the select) -------------------------
+        all_failed_qs = (
             FailedTopic.objects
             .filter(evaluation__course=course)
             .values("concept_id")
             .annotate(fail_count=Count("id"))
-            .order_by("-fail_count")[:3]
+            .order_by("-fail_count")
         )
-        top_failed_concepts = [
+        available_topics = [
             {"concept_id": entry["concept_id"], "fail_count": entry["fail_count"]}
-            for entry in top_failed_qs
+            for entry in all_failed_qs
+        ]
+
+        # -- Student List -----------------------------------------------------
+        students_qs = LMSUser.objects.filter(pk__in=enrolled_student_ids).values("id", "username")
+        students = [
+            {"id": s["id"], "username": s["username"]}
+            for s in students_qs
         ]
 
         return Response({
@@ -220,5 +227,7 @@ class TeacherDashboardViewSet(viewsets.ViewSet):
             "average_quiz_score": average_quiz_score,
             "proctoring_alerts": proctoring_alerts,
             "vark_distribution": vark_distribution,
-            "top_failed_concepts": top_failed_concepts,
+            "top_failed_concepts": available_topics[:3],
+            "available_topics": available_topics,
+            "students": students,
         })
