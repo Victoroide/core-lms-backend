@@ -3,7 +3,7 @@ from rest_framework import viewsets
 from rest_framework.permissions import AllowAny
 
 from apps.assessments.models import Quiz
-from apps.assessments.serializers import QuizDetailSerializer, QuizListSerializer
+from apps.assessments.serializers import QuizDetailSerializer, QuizListSerializer, QuizTutorSerializer
 
 
 class QuizViewSet(viewsets.ReadOnlyModelViewSet):

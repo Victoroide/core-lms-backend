@@ -48,3 +48,22 @@ class QuizDetailSerializer(serializers.ModelSerializer):
             "is_active",
             "questions",
         ]
+
+
+class QuizTutorSerializer(serializers.ModelSerializer):
+    topic = serializers.CharField(source="course.name", read_only=True)
+    question_count = serializers.IntegerField(source="questions.count", read_only=True)
+
+    class Meta:
+        model = Quiz
+        fields = [
+            "id",
+            "title",
+            "description",
+            "topic",
+            "created_at",
+            "course",
+            "time_limit_minutes",
+            "is_active",
+            "question_count",
+        ]

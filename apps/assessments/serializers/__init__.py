@@ -3,6 +3,7 @@ from apps.assessments.serializers.quiz_serializer import (
     QuestionSerializer,
     QuizDetailSerializer,
     QuizListSerializer,
+    QuizTutorSerializer,
 )
 from apps.assessments.serializers.attempt_serializer import (
     AttemptAnswerSerializer,
@@ -22,6 +23,7 @@ __all__ = [
     "QuestionSerializer",
     "QuizDetailSerializer",
     "QuizListSerializer",
+    "QuizTutorSerializer",
     "AttemptAnswerSerializer",
     "AttemptSubmitSerializer",
     "AttemptResultSerializer",
