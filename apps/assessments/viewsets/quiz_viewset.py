@@ -3,7 +3,7 @@ from rest_framework import viewsets
 from rest_framework.permissions import AllowAny
 
 from apps.assessments.models import Quiz
-from apps.assessments.serializers import QuizDetailSerializer, QuizListSerializer
+from apps.assessments.serializers import QuizDetailSerializer, QuizListSerializer, QuizTutorSerializer
 
 
 from apps.learning.permissions import IsTutor
@@ -14,7 +14,16 @@ class QuizViewSet(viewsets.ModelViewSet):
     Tutors can create, update, and delete quizzes. Students can only read active quizzes.
     """
 
-    queryset = Quiz.objects.filter(is_active=True)
+    def get_queryset(self):
+        queryset = Quiz.objects.all()
+        if not (self.request.user.is_authenticated and self.request.user.role == "TUTOR"):
+            queryset = queryset.filter(is_active=True)
+        
+        course_id = self.request.query_params.get("course")
+        if course_id:
+            queryset = queryset.filter(course_id=course_id)
+            
+        return queryset
     
     def get_permissions(self):
         if self.action in ("create", "update", "partial_update", "destroy"):
@@ -22,9 +31,11 @@ class QuizViewSet(viewsets.ModelViewSet):
         return [AllowAny()]
 
     def get_serializer_class(self):
-        if self.action == "retrieve" or self.action == "create":
-            return QuizDetailSerializer
-        return QuizListSerializer
+        if self.action == "list":
+            return QuizListSerializer
+        if self.request.user.is_authenticated and self.request.user.role == "TUTOR":
+            return QuizTutorSerializer
+        return QuizDetailSerializer
 
     @swagger_auto_schema(
         operation_summary="List active quizzes",
